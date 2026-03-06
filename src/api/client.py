@@ -47,6 +47,9 @@ class DevinAPIClient:
     # ------------------------------------------------------------------
 
     def _url(self, path: str, *, api_version: str = "v3") -> str:
+        if api_version == "v1":
+            # V1 endpoints don't include the /organizations/{org_id} prefix.
+            return f"{DEVIN_API_BASE_URL}/v1{path}"
         return f"{DEVIN_API_BASE_URL}/{api_version}/organizations/{self._org_id}{path}"
 
     def _request(
@@ -159,10 +162,16 @@ class DevinAPIClient:
         raise DevinAPIError(404, f"Session {session_id} not found via list endpoint.")
 
     def send_message(self, session_id: str, message: str) -> dict[str, Any]:
-        """Send a follow-up message to a running session."""
+        """Send a follow-up message to a running session.
+
+        Uses the **v1** endpoint (``POST /v1/sessions/{id}/message``)
+        which works with ``cog_`` service-user keys without requiring
+        the ``ManageOrgSessions`` permission that the v3 endpoint needs.
+        """
         return self._request(
             "POST",
-            f"/sessions/{session_id}/messages",
+            f"/sessions/{session_id}/message",
+            _api_version="v1",
             json={"message": message},
         )
 
