@@ -33,11 +33,17 @@ def _api_get(url: str, api_key: str) -> dict:
         sys.exit(1)
 
 
-def list_sessions(api_key: str, first: int = 100, after: str | None = None) -> dict:
+def list_sessions(
+    api_key: str,
+    org_id: str,
+    first: int = 100,
+    after: str | None = None,
+) -> dict:
     """Fetch sessions from the Devin v3 API.
 
     Args:
         api_key: Devin service user API key (starts with cog_).
+        org_id: Your Devin organization ID (starts with org-).
         first: Maximum number of sessions to return per page (default 100, max 200).
         after: Cursor for fetching the next page of results.
 
@@ -48,7 +54,7 @@ def list_sessions(api_key: str, first: int = 100, after: str | None = None) -> d
     if after is not None:
         params["after"] = after
 
-    url = f"{DEVIN_API_BASE_URL}/v3/organizations/sessions?{urlencode(params)}"
+    url = f"{DEVIN_API_BASE_URL}/v3/organizations/{org_id}/sessions?{urlencode(params)}"
     return _api_get(url, api_key)
 
 
@@ -72,6 +78,11 @@ def main() -> None:
         help="Your Devin service user API key (starts with cog_).",
     )
     parser.add_argument(
+        "--org-id",
+        required=True,
+        help="Your Devin organization ID (starts with org-). Find it in Settings > General.",
+    )
+    parser.add_argument(
         "--first",
         type=int,
         default=100,
@@ -90,7 +101,7 @@ def main() -> None:
 
     while True:
         page += 1
-        data = list_sessions(args.api_key, first=args.first, after=after)
+        data = list_sessions(args.api_key, args.org_id, first=args.first, after=after)
         items = data.get("items", [])
         all_sessions.extend(items)
 

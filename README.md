@@ -6,6 +6,7 @@ A sample Python script that uses the [Devin v3 API](https://docs.devin.ai/api-re
 
 - Python 3.10+
 - A Devin **service user** API key (starts with `cog_`) — create one in **Settings > Service users**
+- Your Devin **organization ID** (starts with `org-`) — find it in **Settings > General**
 
 No external dependencies are required — the script uses only the Python standard library.
 
@@ -15,8 +16,15 @@ No external dependencies are required — the script uses only the Python standa
 ## Usage
 
 ```bash
-python list_sessions.py <YOUR_DEVIN_API_KEY>
+python list_sessions.py <YOUR_DEVIN_API_KEY> --org-id <YOUR_ORG_ID>
 ```
+
+### Required arguments
+
+| Argument       | Description                                                                          |
+|----------------|--------------------------------------------------------------------------------------|
+| `api_key`      | Your Devin service user API key (starts with `cog_`)                                 |
+| `--org-id`     | Your Devin organization ID (starts with `org-`). Find it in **Settings > General**   |
 
 ### Optional arguments
 
@@ -30,19 +38,19 @@ python list_sessions.py <YOUR_DEVIN_API_KEY>
 List the first 100 sessions:
 
 ```bash
-python list_sessions.py cog_your_key_here
+python list_sessions.py cog_your_key_here --org-id org-your_org_id_here
 ```
 
 List 10 sessions per page:
 
 ```bash
-python list_sessions.py cog_your_key_here --first 10
+python list_sessions.py cog_your_key_here --org-id org-your_org_id_here --first 10
 ```
 
 Fetch all sessions across every page:
 
 ```bash
-python list_sessions.py cog_your_key_here --all-pages
+python list_sessions.py cog_your_key_here --org-id org-your_org_id_here --all-pages
 ```
 
 ## Sample output
