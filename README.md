@@ -1,68 +1,111 @@
-# DevinDemo
+# DevinDemo — Feature Flag & Tech Debt Scanner
 
-Python utilities for the [Devin API](https://docs.devin.ai/api-reference/overview):
+A Devin-powered automation that scans Python codebases for stale feature flags,
+dead code, and tech debt — then automates cleanup via PRs and reports findings.
 
-- **`list_sessions.py`** -- List all sessions in your organization (v3 API, requires `cog_` service user key).
-- **`send_message.py`** -- Send a message to an existing session (v1 API, works with Teams accounts using `apk_user_*` / `apk_*` keys).
+> *"We've got feature flags from three years ago still in the codebase. Dead code
+> everywhere. New engineers spend their first two weeks just figuring out what's
+> real and what's abandoned."*
+
+## How it works
+
+The tool uses the [Devin v3 API](https://docs.devin.ai/api-reference/v3/usage-examples)
+to create AI-powered sessions that analyse a target repository.  The pipeline
+has four stages:
+
+| Stage | Status | Description |
+|-------|--------|-------------|
+| **1. Identify** | Implemented | Quick scan — flag potential feature flags, dead code, and tech debt (low bar, fast) |
+| **2. Validate** | Stub | Deep-dive verification of each finding from Part 1 (slow, thorough) |
+| **3. Cleanup**  | Stub | Generate PRs that remove dead code and simplify branches |
+| **4. Report**   | Stub | Publish summaries to Notion, Slack, or GitHub Issues |
 
 ## Prerequisites
 
-- Python 3.10+
-- No external dependencies — both scripts use only the Python standard library.
+- **Python 3.10+**
+- **pip** dependencies: `pip install -r requirements.txt`
+- A Devin **service user** API key (starts with `cog_`) — create one in **Settings > Service users**
+- Your Devin **organization ID** (starts with `org-`) — find it in **Settings > General**
 
 ### Authentication
 
-| Script              | Key type                                  | Where to create                           |
+| Script / Tool       | Key type                                  | Where to create                           |
 |---------------------|-------------------------------------------|-------------------------------------------|
-| `list_sessions.py`  | Service user key (`cog_*`)                | **Settings > Service users**              |
+| `main.py` (scanner) | Service user key (`cog_*`)               | **Settings > Service users**              |
+| `list_sessions.py`  | Service user key (`cog_*`)               | **Settings > Service users**              |
 | `send_message.py`   | Personal key (`apk_user_*`) or Service key (`apk_*`) | **Settings > API keys** |
 
-> **Note:** `cog_*` keys do **not** work with the v1 API, and `apk_*` keys do **not** work with the v3 API.
+> **Note:** `cog_*` keys do **not** work with the v1 API, and `apk_*` / `apk_user_*` keys do **not** work with the v3 API.
 > See the [authentication docs](https://docs.devin.ai/api-reference/authentication) for details.
+
+## Quick start
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run a scan
+python main.py --api-key <YOUR_COG_KEY> --org-id <YOUR_ORG_ID> scan owner/repo
+```
 
 ## Usage
 
-### list_sessions.py
+### main.py (scanner)
 
 ```bash
-python list_sessions.py <YOUR_DEVIN_API_KEY> --org-id <YOUR_ORG_ID>
+python main.py --api-key <KEY> --org-id <ORG_ID> <command> [options]
 ```
 
-#### Required arguments
+### Global arguments
 
-| Argument       | Description                                                                          |
-|----------------|--------------------------------------------------------------------------------------|
-| `api_key`      | Your Devin service user API key (starts with `cog_`)                                 |
-| `--org-id`     | Your Devin organization ID (starts with `org-`). Find it in **Settings > General**   |
+| Argument     | Description |
+|--------------|-------------|
+| `--api-key`  | Devin service user API key (starts with `cog_`) |
+| `--org-id`   | Devin organization ID (starts with `org-`) |
 
-#### Optional arguments
+### Commands
 
-| Argument       | Description                                          | Default |
-|----------------|------------------------------------------------------|---------|
-| `--first`      | Max number of sessions to return per page (max 200)  | 100     |
-| `--all-pages`  | Automatically fetch every page of results            | off     |
+#### `scan` — Identify feature flags & tech debt (Part 1)
+
+```bash
+python main.py --api-key <KEY> --org-id <ORG_ID> scan owner/repo [options]
+```
+
+| Option            | Description                                  | Default |
+|-------------------|----------------------------------------------|---------|
+| `repo`            | GitHub repository in `owner/repo` format     | —       |
+| `-o`, `--output`  | Write full JSON results to a file            | —       |
+| `--poll-interval`  | Seconds between status polls                | 15      |
+| `--poll-timeout`   | Max seconds to wait for session completion  | 900     |
+| `--max-acu`        | Optional ACU cap for the Devin session      | —       |
+
+#### `validate` — Validate findings (Part 2) — *not yet implemented*
+
+#### `cleanup` — Generate cleanup PRs (Part 3) — *not yet implemented*
+
+#### `report` — Publish tech-debt report (Part 4) — *not yet implemented*
 
 #### Examples
 
-List the first 100 sessions:
+Scan a repository and print results to stdout:
 
 ```bash
-python list_sessions.py cog_your_key_here --org-id org-your_org_id_here
+python main.py --api-key cog_xxx --org-id org-xxx scan myorg/myrepo
 ```
 
-List 10 sessions per page:
+Scan and save full JSON results to a file:
 
 ```bash
-python list_sessions.py cog_your_key_here --org-id org-your_org_id_here --first 10
+python main.py --api-key cog_xxx --org-id org-xxx scan myorg/myrepo -o results.json
 ```
 
-Fetch all sessions across every page:
-
-```bash
-python list_sessions.py cog_your_key_here --org-id org-your_org_id_here --all-pages
-```
+The output JSON from Part 1 is the input for Part 2.  Each finding has a unique
+`id` and a `verification_status` field (initially `"unverified"`) that Part 2
+will update to `"verified"`, `"false_positive"`, or `"needs_review"`.
 
 ### send_message.py
+
+A v1 API workaround for **Teams accounts** that cannot use the v3 `send_message` endpoint.
 
 ```bash
 python send_message.py <YOUR_DEVIN_API_KEY> <SESSION_ID> "<MESSAGE>"
@@ -86,30 +129,29 @@ python send_message.py apk_user_your_key_here abc-123-def-456 "Please also add u
 
 ## Sample output
 
-### list_sessions.py
+### Scanner (main.py)
 
 ```
-Total sessions: 42
-Fetched 3 session(s) (1 page(s)):
+[scanner] Creating Devin session to scan myorg/myrepo …
+[scanner] Session created: abc123
+[scanner] URL: https://app.devin.ai/sessions/abc123
+[scanner] Polling every 15s (timeout 900s) …
+[poll] abc123: running (working)
+[poll] abc123: running (finished)
 
-  [finished] Fix login bug
-    ID:      abc-123
-    Created: 2026-03-01 12:00:00 UTC
-    Updated: 2026-03-01 13:00:00 UTC
-    URL:     https://app.devin.ai/sessions/abc-123
-    PR: https://github.com/org/repo/pull/42 (merged)
+============================================================
+SCAN SUMMARY
+============================================================
+  Repository:     myorg/myrepo
+  Files scanned:  47
+  Feature flags:  5
+  Dead code:      12
+  Tech debt:      8
 
-  [working] Add dark mode
-    ID:      def-456
-    Created: 2026-03-05 09:00:00 UTC
-    Updated: 2026-03-05 09:30:00 UTC
-    URL:     https://app.devin.ai/sessions/def-456
-
-  [blocked] Refactor auth module
-    ID:      ghi-789
-    Created: 2026-03-06 08:00:00 UTC
-    Updated: 2026-03-06 08:15:00 UTC
-    URL:     https://app.devin.ai/sessions/ghi-789
+  High-priority items:
+    - ENABLE_LEGACY_AUTH flag in src/auth.py:42 — always True, dead else branch
+    - 3 unused imports in src/utils.py
+============================================================
 ```
 
 ### send_message.py
@@ -119,8 +161,112 @@ Sending message to session abc-123-def-456 ...
 Message sent successfully.
 ```
 
+### Output JSON structure
+
+Each finding includes fields for Part 2 hand-off:
+
+```json
+{
+  "meta": {
+    "scanner_version": "1.0.0",
+    "scan_timestamp": "2026-03-06T12:00:00Z",
+    "session_id": "abc123",
+    "repo": "myorg/myrepo"
+  },
+  "feature_flags": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "verification_status": "unverified",
+      "file": "src/auth.py",
+      "line": 42,
+      "pattern_type": "boolean_config_flag",
+      "code_snippet": "ENABLE_LEGACY_AUTH = True",
+      "flag_name": "ENABLE_LEGACY_AUTH",
+      "reasoning": "Boolean flag gating authentication path"
+    }
+  ],
+  "dead_code": [ ... ],
+  "tech_debt": [ ... ],
+  "summary": { ... }
+}
+```
+
+Part 2 will iterate through each finding by `id`, perform deep verification,
+and update `verification_status` accordingly.
+
 ## Why use the v1 API for sending messages?
 
 The v3 API's `send_message` endpoint requires the `ManageOrgSessions` permission, which is only available to **Enterprise** accounts with `cog_*` service user keys.
 
 If you have a **Teams** account, you can use the [v1 `send_message` endpoint](https://docs.devin.ai/api-reference/v1/sessions/send-a-message-to-an-existing-devin-session) instead. It accepts Personal API Keys (`apk_user_*`) and Service API Keys (`apk_*`), which are available on all account tiers. The `send_message.py` script wraps this endpoint for convenience.
+
+## Project structure
+
+```
+DevinDemo/
+├── main.py                     # CLI entrypoint
+├── requirements.txt
+├── list_sessions.py            # Standalone Devin API session lister (utility)
+├── send_message.py             # v1 API message sender (Teams workaround)
+├── src/
+│   ├── api/
+│   │   └── client.py           # Devin v3 API client wrapper
+│   ├── scanner/
+│   │   └── identifier.py       # Part 1: Identification (implemented)
+│   ├── validator/
+│   │   └── validator.py        # Part 2: Validation (stub)
+│   ├── cleanup/
+│   │   └── cleanup.py          # Part 3: Cleanup PR generation (stub)
+│   └── reporter/
+│       └── reporter.py         # Part 4: Reporting (stub)
+```
+
+## Assumptions & limitations
+
+These are documented so that contributors and users know the current scope.
+
+### Target languages
+- **Python only** — the scanner currently analyses `.py` files.  Support for
+  other languages (JS/TS, Java, Go, etc.) is planned for future iterations.
+
+### Feature flag detection
+- **General patterns only** — we do NOT integrate with specific flag management
+  systems (LaunchDarkly, Unleash, Split, etc.).  Instead we look for:
+  - Environment variable checks that gate behaviour (`os.environ.get("FEATURE_…")`)
+  - Boolean configuration variables used in `if`/`else` branches
+  - Functions whose purpose is to check whether a feature is enabled
+  - Constants or settings that act as on/off switches
+- This means some flags may be missed if they use unconventional patterns, and
+  some false positives are expected.  Part 2 (validation) will reduce noise.
+
+### Dead code detection
+- Unreachable branches (`if False:`, `if 0:`, always-true guards)
+- Unused functions/classes (defined but never called)
+- Unused imports
+- Large blocks of commented-out code (≥3 lines)
+
+### Tech debt detection
+- `TODO` / `FIXME` / `HACK` / `XXX` comments
+- Deprecated stdlib or third-party API usage
+- Python version compatibility shims (`sys.version` checks, `six` usage)
+
+### Devin API
+- All four stages use the **Devin v3 API** with service user credentials.
+- **Part 1** (identify): quick Devin session scan — low bar for flagging,
+  fast, may include false positives.
+- **Part 2** (validate): deep-dive Devin sessions that verify each finding
+  from Part 1 individually — slower, thorough, reduces false positives.
+- **Part 3** (cleanup): Devin sessions that generate cleanup PRs.
+- **Part 4** (report): Devin sessions that publish summaries.
+- The `org_id` **must be provided explicitly** in the URL path — despite the
+  docs stating it can be omitted for org-scoped service users, omitting it
+  returns 404.
+- Structured output (`structured_output_schema`) is used to get parseable
+  JSON results from Devin sessions.
+
+## Utilities
+
+### `list_sessions.py`
+
+A standalone script to list all Devin sessions in your organization.
+See `python list_sessions.py --help` for usage.
