@@ -209,20 +209,19 @@ class DevinAPIClient:
         )
 
     def archive_session(self, session_id: str) -> dict[str, Any]:
-        """Archive (put to sleep) a session.
+        """Put a session to sleep by sending ``"sleep"`` via v1.
 
-        Uses the ``v3beta1`` archive endpoint to suspend a running
-        session so it no longer consumes resources.
+        The v3beta1 ``/archive`` endpoint requires elevated permissions
+        that service-user keys typically lack.  Instead, we send a
+        ``"sleep"`` message through the v1 ``send_message()`` endpoint,
+        which works with ``cog_`` / ``apk_`` keys and reliably puts the
+        session to sleep.
         """
         try:
-            return self._request(
-                "POST",
-                f"/sessions/{session_id}/archive",
-                _api_version="v3beta1",
-            )
+            return self.send_message(session_id, "sleep")
         except DevinAPIError as exc:
-            # Non-critical — log and continue if archiving fails
-            print(f"[api] Warning: could not archive session {session_id}: {exc}")
+            # Non-critical — log and continue if sleeping fails
+            print(f"[api] Warning: could not sleep session {session_id}: {exc}")
             return {}
 
     # ------------------------------------------------------------------
