@@ -161,7 +161,9 @@ def api_dashboard_data():
             return jsonify({"error": "No validate results found"}), 404
         file_path = results[0]["path"]
 
-    abs_path = os.path.join(PROJECT_ROOT, file_path)
+    abs_path = os.path.realpath(os.path.join(PROJECT_ROOT, file_path))
+    if not abs_path.startswith(os.path.realpath(PROJECT_ROOT) + os.sep):
+        return jsonify({"error": "Invalid file path"}), 400
     if not os.path.isfile(abs_path):
         return jsonify({"error": f"File not found: {file_path}"}), 404
 
