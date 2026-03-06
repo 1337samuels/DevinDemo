@@ -6,7 +6,9 @@ structured findings via the ``structured_output`` mechanism.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import time
 from typing import Any
 
 from src.api.client import DevinAPIClient
@@ -203,6 +205,65 @@ Be thorough — scan every ``.py`` file in the repository.
 """
 
 
+# ---------------------------------------------------------------------------
+# Post-processing — enrich results for Part 2 consumption
+# ---------------------------------------------------------------------------
+
+
+def _make_finding_id(category: str, file: str, line: int) -> str:
+    """Deterministic short ID for a finding based on its location."""
+    raw = f"{category}:{file}:{line}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
+def _enrich_findings(
+    findings: list[dict[str, Any]], category: str
+) -> list[dict[str, Any]]:
+    """Add ``id`` and ``verification_status`` to each finding."""
+    enriched: list[dict[str, Any]] = []
+    for item in findings:
+        finding_id = _make_finding_id(
+            category, item.get("file", ""), item.get("line", 0)
+        )
+        enriched.append(
+            {
+                "id": finding_id,
+                "verification_status": "unverified",
+                **item,
+            }
+        )
+    return enriched
+
+
+def _enrich_results(
+    raw: dict[str, Any],
+    *,
+    session_id: str,
+    repo: str,
+) -> dict[str, Any]:
+    """Wrap raw Devin output with metadata and per-finding IDs.
+
+    The enriched output is the canonical input format for Part 2
+    (validation).  Each finding has:
+    - ``id``: deterministic hash so Part 2 can reference individual items.
+    - ``verification_status``: starts as ``"unverified"``; Part 2 will
+      update to ``"verified"``, ``"false_positive"``, or ``"needs_review"``.
+    """
+    return {
+        "meta": {
+            "scanner_version": "1.0.0",
+            "scan_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "session_id": session_id,
+            "repo": repo,
+        },
+        "repo": raw.get("repo", repo),
+        "feature_flags": _enrich_findings(raw.get("feature_flags", []), "feature_flag"),
+        "dead_code": _enrich_findings(raw.get("dead_code", []), "dead_code"),
+        "tech_debt": _enrich_findings(raw.get("tech_debt", []), "tech_debt"),
+        "summary": raw.get("summary", {}),
+    }
+
+
 class FeatureFlagScanner:
     """Scan a repository for feature flags, dead code, and tech debt.
 
@@ -269,6 +330,8 @@ class FeatureFlagScanner:
                 f"Final status: {final.get('status')}/{final.get('status_detail')}"
             )
 
+        enriched = _enrich_results(structured, session_id=session_id, repo=repo)
+
         print("[scanner] Scan complete. Results:")
-        print(json.dumps(structured, indent=2))
-        return structured
+        print(json.dumps(enriched, indent=2))
+        return enriched

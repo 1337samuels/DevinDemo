@@ -15,8 +15,8 @@ has four stages:
 
 | Stage | Status | Description |
 |-------|--------|-------------|
-| **1. Identify** | Implemented | Scan a repo for feature flags, dead code, and tech debt |
-| **2. Validate** | Stub | Confirm findings are truly legacy (git blame, flag status) |
+| **1. Identify** | Implemented | Quick scan — flag potential feature flags, dead code, and tech debt (low bar, fast) |
+| **2. Validate** | Stub | Deep-dive verification of each finding from Part 1 (slow, thorough) |
 | **3. Cleanup**  | Stub | Generate PRs that remove dead code and simplify branches |
 | **4. Report**   | Stub | Publish summaries to Notion, Slack, or GitHub Issues |
 
@@ -89,6 +89,10 @@ Scan and save full JSON results to a file:
 python main.py --api-key cog_xxx --org-id org-xxx scan myorg/myrepo -o results.json
 ```
 
+The output JSON from Part 1 is the input for Part 2.  Each finding has a unique
+`id` and a `verification_status` field (initially `"unverified"`) that Part 2
+will update to `"verified"`, `"false_positive"`, or `"needs_review"`.
+
 ## Sample output
 
 ```
@@ -113,6 +117,39 @@ SCAN SUMMARY
     - 3 unused imports in src/utils.py
 ============================================================
 ```
+
+### Output JSON structure
+
+Each finding includes fields for Part 2 hand-off:
+
+```json
+{
+  "meta": {
+    "scanner_version": "1.0.0",
+    "scan_timestamp": "2026-03-06T12:00:00Z",
+    "session_id": "abc123",
+    "repo": "myorg/myrepo"
+  },
+  "feature_flags": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "verification_status": "unverified",
+      "file": "src/auth.py",
+      "line": 42,
+      "pattern_type": "boolean_config_flag",
+      "code_snippet": "ENABLE_LEGACY_AUTH = True",
+      "flag_name": "ENABLE_LEGACY_AUTH",
+      "reasoning": "Boolean flag gating authentication path"
+    }
+  ],
+  "dead_code": [ ... ],
+  "tech_debt": [ ... ],
+  "summary": { ... }
+}
+```
+
+Part 2 will iterate through each finding by `id`, perform deep verification,
+and update `verification_status` accordingly.
 
 ## Project structure
 
@@ -165,6 +202,12 @@ These are documented so that contributors and users know the current scope.
 
 ### Devin API
 - All four stages use the **Devin v3 API** with service user credentials.
+- **Part 1** (identify): quick Devin session scan — low bar for flagging,
+  fast, may include false positives.
+- **Part 2** (validate): deep-dive Devin sessions that verify each finding
+  from Part 1 individually — slower, thorough, reduces false positives.
+- **Part 3** (cleanup): Devin sessions that generate cleanup PRs.
+- **Part 4** (report): Devin sessions that publish summaries.
 - The `org_id` **must be provided explicitly** in the URL path — despite the
   docs stating it can be omitted for org-scoped service users, omitting it
   returns 404.
