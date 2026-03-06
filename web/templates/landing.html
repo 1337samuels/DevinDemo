@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevinDemo &mdash; Dead Code Scanner</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface-hover: #22263a;
+            --border: #2a2e3e;
+            --text: #e1e4ed;
+            --text-muted: #8b8fa3;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --orange: #f97316;
+            --cyan: #06b6d4;
+            --pink: #ec4899;
+            --radius: 10px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ---- Hero ---- */
+        .hero {
+            text-align: center;
+            padding: 3.5rem 1.5rem 2rem;
+            position: relative;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 50%;
+            transform: translateX(-50%);
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero h1 {
+            font-size: 2.75rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin-bottom: 0.5rem;
+            position: relative;
+        }
+
+        .hero h1 .highlight {
+            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            color: var(--text-muted);
+            font-size: 1.125rem;
+            max-width: 600px;
+            margin: 0 auto 2rem;
+            line-height: 1.6;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.875rem 2rem;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* ---- Section container ---- */
+        .section {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 2.5rem;
+            color: var(--text);
+        }
+
+        /* ---- Pipeline Flow (SVG-based arrow chart) ---- */
+        .pipeline-flow {
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
+            gap: 0;
+            margin: 0 auto 3rem;
+            max-width: 1050px;
+        }
+
+        .phase-card {
+            flex: 1;
+            max-width: 220px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem 1rem;
+            text-align: center;
+            position: relative;
+            transition: border-color 0.3s, transform 0.3s;
+        }
+
+        .phase-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-4px);
+        }
+
+        .phase-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 50%;
+            font-size: 1.125rem;
+            font-weight: 700;
+            margin-bottom: 0.75rem;
+        }
+
+        .phase-card:nth-child(1) .phase-num { background: rgba(99,102,241,0.2); color: var(--accent); }
+        .phase-card:nth-child(3) .phase-num { background: rgba(6,182,212,0.2); color: var(--cyan); }
+        .phase-card:nth-child(5) .phase-num { background: rgba(249,115,22,0.2); color: var(--orange); }
+        .phase-card:nth-child(7) .phase-num { background: rgba(34,197,94,0.2); color: var(--green); }
+
+        .phase-card h3 {
+            font-size: 0.9375rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .phase-icon {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        .phase-card .devin-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            padding: 0.2rem 0.5rem;
+            border-radius: 999px;
+            margin-top: 0.5rem;
+            letter-spacing: 0.02em;
+        }
+
+        .devin-badge.api {
+            background: rgba(99,102,241,0.15);
+            color: var(--accent-hover);
+            border: 1px solid rgba(99,102,241,0.3);
+        }
+
+        .devin-badge.static {
+            background: rgba(34,197,94,0.12);
+            color: var(--green);
+            border: 1px solid rgba(34,197,94,0.3);
+        }
+
+        /* Arrow connectors between phase cards */
+        .arrow-connector {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            flex-shrink: 0;
+        }
+
+        .arrow-connector svg {
+            overflow: visible;
+        }
+
+        /* ---- Devin integration diagram ---- */
+        .devin-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2rem;
+            margin: 0 auto 3rem;
+            max-width: 900px;
+            flex-wrap: wrap;
+        }
+
+        .devin-box {
+            background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(6,182,212,0.08));
+            border: 2px solid var(--accent);
+            border-radius: 16px;
+            padding: 1.75rem 2rem;
+            text-align: center;
+            min-width: 180px;
+        }
+
+        .devin-box .logo-text {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), var(--cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .devin-box .sub {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .devin-api-lines {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .api-line {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.8125rem;
+        }
+
+        .api-line .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* ---- Verification Layers Grid ---- */
+        .layers-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.75rem;
+            margin: 0 auto 3rem;
+            max-width: 900px;
+        }
+
+        @media (max-width: 700px) {
+            .layers-grid { grid-template-columns: repeat(2, 1fr); }
+            .pipeline-flow { flex-wrap: wrap; gap: 0.75rem; }
+            .arrow-connector { display: none; }
+        }
+
+        .layer-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.875rem;
+            text-align: center;
+            transition: border-color 0.2s;
+        }
+
+        .layer-card:hover {
+            border-color: var(--accent);
+        }
+
+        .layer-card .layer-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.375rem;
+            display: block;
+        }
+
+        .layer-card .layer-name {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text);
+            line-height: 1.3;
+        }
+
+        .layer-card .layer-num-badge {
+            font-size: 0.625rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        /* ---- Output targets ---- */
+        .outputs-row {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin: 0 auto 3rem;
+            flex-wrap: wrap;
+        }
+
+        .output-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem 2rem;
+            text-align: center;
+            min-width: 180px;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+
+        .output-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .output-card .output-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        .output-card h4 {
+            font-size: 0.9375rem;
+            font-weight: 600;
+        }
+
+        .output-card p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        /* ---- CTA bottom ---- */
+        .cta-section {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            background: linear-gradient(180deg, transparent, rgba(99,102,241,0.05));
+            border-top: 1px solid var(--border);
+        }
+
+        .cta-section h2 {
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .cta-section .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .cta-section .btn {
+            font-size: 1.125rem;
+            padding: 1rem 2.5rem;
+        }
+
+        /* ---- Full architecture SVG ---- */
+        .architecture-svg-wrap {
+            max-width: 1050px;
+            margin: 0 auto 2rem;
+            text-align: center;
+        }
+
+        .architecture-svg-wrap svg {
+            width: 100%;
+            height: auto;
+        }
+
+        /* ---- Footer ---- */
+        footer {
+            text-align: center;
+            padding: 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ===== HERO ===== -->
+    <section class="hero">
+        <h1>
+            <span class="highlight">Intelligent</span> Dead Code Scanner
+        </h1>
+        <p>
+            Automated 4-phase pipeline that detects, validates, removes,
+            and reports legacy code &mdash; powered by Devin AI.
+        </p>
+        <div class="hero-actions">
+            <a href="/dashboard" class="btn btn-primary">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
+                Open Dashboard &amp; C&amp;C
+            </a>
+            <a href="#pipeline" class="btn btn-outline">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                See How It Works
+            </a>
+        </div>
+    </section>
+
+    <!-- ===== PIPELINE FLOW ===== -->
+    <section class="section" id="pipeline">
+        <h2 class="section-title">Pipeline Flow</h2>
+
+        <div class="pipeline-flow">
+            <!-- Phase 1 -->
+            <div class="phase-card">
+                <span class="phase-icon">&#128269;</span>
+                <div class="phase-num">1</div>
+                <h3>Scan</h3>
+                <span class="devin-badge api">Devin API</span>
+            </div>
+
+            <div class="arrow-connector">
+                <svg width="50" height="24"><defs><marker id="ah1" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6366f1"/></marker></defs><line x1="0" y1="12" x2="40" y2="12" stroke="#6366f1" stroke-width="2" marker-end="url(#ah1)"/></svg>
+            </div>
+
+            <!-- Phase 2 -->
+            <div class="phase-card">
+                <span class="phase-icon">&#9989;</span>
+                <div class="phase-num">2</div>
+                <h3>Validate</h3>
+                <span class="devin-badge api">Devin API</span>
+            </div>
+
+            <div class="arrow-connector">
+                <svg width="50" height="24"><defs><marker id="ah2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#06b6d4"/></marker></defs><line x1="0" y1="12" x2="40" y2="12" stroke="#06b6d4" stroke-width="2" marker-end="url(#ah2)"/></svg>
+            </div>
+
+            <!-- Phase 3 -->
+            <div class="phase-card">
+                <span class="phase-icon">&#128736;</span>
+                <div class="phase-num">3</div>
+                <h3>Cleanup PRs</h3>
+                <span class="devin-badge api">Devin API</span>
+            </div>
+
+            <div class="arrow-connector">
+                <svg width="50" height="24"><defs><marker id="ah3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#f97316"/></marker></defs><line x1="0" y1="12" x2="40" y2="12" stroke="#f97316" stroke-width="2" marker-end="url(#ah3)"/></svg>
+            </div>
+
+            <!-- Phase 4 -->
+            <div class="phase-card">
+                <span class="phase-icon">&#128200;</span>
+                <div class="phase-num">4</div>
+                <h3>Report</h3>
+                <span class="devin-badge static">Static Code</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== ARCHITECTURE DIAGRAM (SVG) ===== -->
+    <section class="section">
+        <h2 class="section-title">Architecture</h2>
+        <div class="architecture-svg-wrap">
+            <svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+                <!-- Background -->
+                <rect x="0" y="0" width="1000" height="520" rx="12" fill="#1a1d27" stroke="#2a2e3e"/>
+
+                <!-- Title -->
+                <text x="500" y="36" text-anchor="middle" fill="#e1e4ed" font-size="16" font-weight="600">End-to-End Architecture</text>
+
+                <!-- ---- REPO BOX ---- -->
+                <rect x="30" y="62" width="130" height="56" rx="8" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="95" y="85" text-anchor="middle" fill="#8b8fa3" font-size="11" font-weight="600">YOUR REPO</text>
+                <text x="95" y="102" text-anchor="middle" fill="#e1e4ed" font-size="12">owner/repo</text>
+
+                <!-- Arrow repo -> Phase 1 -->
+                <line x1="160" y1="90" x2="195" y2="90" stroke="#6366f1" stroke-width="2" marker-end="url(#arrow-accent)"/>
+
+                <!-- ---- PHASE 1: SCAN ---- -->
+                <rect x="198" y="55" width="150" height="70" rx="8" fill="rgba(99,102,241,0.08)" stroke="#6366f1" stroke-dasharray="4"/>
+                <text x="273" y="78" text-anchor="middle" fill="#6366f1" font-size="13" font-weight="700">Phase 1: Scan</text>
+                <text x="273" y="96" text-anchor="middle" fill="#8b8fa3" font-size="10">Detect dead code</text>
+                <text x="273" y="113" text-anchor="middle" fill="#818cf8" font-size="9">via Devin API</text>
+
+                <!-- Arrow Phase 1 -> JSON 1 -->
+                <line x1="273" y1="125" x2="273" y2="155" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow-accent)"/>
+
+                <!-- JSON output 1 -->
+                <rect x="228" y="158" width="90" height="30" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="273" y="178" text-anchor="middle" fill="#eab308" font-size="10">scan.json</text>
+
+                <!-- Arrow JSON 1 -> Phase 2 -->
+                <line x1="318" y1="173" x2="380" y2="173" stroke="#06b6d4" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+                <!-- ---- PHASE 2: VALIDATE ---- -->
+                <rect x="383" y="140" width="150" height="70" rx="8" fill="rgba(6,182,212,0.08)" stroke="#06b6d4" stroke-dasharray="4"/>
+                <text x="458" y="163" text-anchor="middle" fill="#06b6d4" font-size="13" font-weight="700">Phase 2: Validate</text>
+                <text x="458" y="181" text-anchor="middle" fill="#8b8fa3" font-size="10">8 verification layers</text>
+                <text x="458" y="198" text-anchor="middle" fill="#67e8f9" font-size="9">via Devin API</text>
+
+                <!-- Arrow Phase 2 -> JSON 2 -->
+                <line x1="458" y1="210" x2="458" y2="240" stroke="#06b6d4" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+                <!-- JSON output 2 -->
+                <rect x="408" y="243" width="100" height="30" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="458" y="263" text-anchor="middle" fill="#eab308" font-size="10">validate.json</text>
+
+                <!-- Arrow JSON 2 -> Phase 3 -->
+                <line x1="508" y1="258" x2="570" y2="258" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+                <!-- ---- PHASE 3: CLEANUP ---- -->
+                <rect x="573" y="225" width="150" height="70" rx="8" fill="rgba(249,115,22,0.08)" stroke="#f97316" stroke-dasharray="4"/>
+                <text x="648" y="248" text-anchor="middle" fill="#f97316" font-size="13" font-weight="700">Phase 3: Cleanup</text>
+                <text x="648" y="266" text-anchor="middle" fill="#8b8fa3" font-size="10">Generate PRs</text>
+                <text x="648" y="283" text-anchor="middle" fill="#fb923c" font-size="9">via Devin API</text>
+
+                <!-- Arrow Phase 3 -> JSON 3 -->
+                <line x1="648" y1="295" x2="648" y2="325" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+                <!-- JSON output 3 -->
+                <rect x="598" y="328" width="100" height="30" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="648" y="348" text-anchor="middle" fill="#eab308" font-size="10">cleanup.json</text>
+
+                <!-- Arrow JSON 3 -> Phase 4 -->
+                <line x1="698" y1="343" x2="758" y2="343" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+                <!-- Also arrow validate.json -> Phase 4 -->
+                <path d="M458 273 L458 343 L758 343" fill="none" stroke="#22c55e" stroke-width="1.2" stroke-dasharray="4" marker-end="url(#arrow-green)"/>
+
+                <!-- ---- PHASE 4: REPORT ---- -->
+                <rect x="761" y="310" width="150" height="70" rx="8" fill="rgba(34,197,94,0.08)" stroke="#22c55e" stroke-dasharray="4"/>
+                <text x="836" y="333" text-anchor="middle" fill="#22c55e" font-size="13" font-weight="700">Phase 4: Report</text>
+                <text x="836" y="351" text-anchor="middle" fill="#8b8fa3" font-size="10">Publish results</text>
+                <text x="836" y="368" text-anchor="middle" fill="#4ade80" font-size="9">Static code</text>
+
+                <!-- Arrow Phase 4 -> Outputs -->
+                <line x1="836" y1="380" x2="836" y2="410" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+                <!-- OUTPUT BOXES -->
+                <rect x="720" y="413" width="100" height="36" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="762" y="425" text-anchor="middle" fill="#8b8fa3" font-size="8" font-weight="600">NOTION</text>
+                <text x="770" y="440" text-anchor="middle" fill="#e1e4ed" font-size="18">&#128221;</text>
+
+                <rect x="835" y="413" width="100" height="36" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="877" y="425" text-anchor="middle" fill="#8b8fa3" font-size="8" font-weight="600">SLACK</text>
+                <text x="885" y="440" text-anchor="middle" fill="#e1e4ed" font-size="18">&#128172;</text>
+
+                <!-- ---- GITHUB PR output from Phase 3 ---- -->
+                <line x1="723" y1="258" x2="780" y2="258" stroke="#f97316" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
+                <rect x="783" y="240" width="100" height="36" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="833" y="253" text-anchor="middle" fill="#8b8fa3" font-size="8" font-weight="600">GITHUB</text>
+                <text x="833" y="268" text-anchor="middle" fill="#e1e4ed" font-size="11">Pull Requests</text>
+
+                <!-- ---- DEVIN AI central box ---- -->
+                <rect x="380" y="410" width="200" height="60" rx="12" fill="rgba(99,102,241,0.08)" stroke="#6366f1" stroke-width="2"/>
+                <text x="480" y="436" text-anchor="middle" fill="#818cf8" font-size="16" font-weight="700">Devin AI</text>
+                <text x="480" y="455" text-anchor="middle" fill="#8b8fa3" font-size="10">Orchestrator &amp; Code Agent</text>
+
+                <!-- Lines from Devin to Phases 1-3 -->
+                <path d="M480 410 L480 400 L273 400 L273 125" fill="none" stroke="#6366f1" stroke-width="1" stroke-dasharray="3" opacity="0.5"/>
+                <path d="M480 410 L480 400 L458 400 L458 210" fill="none" stroke="#06b6d4" stroke-width="1" stroke-dasharray="3" opacity="0.5"/>
+                <path d="M480 410 L480 400 L648 400 L648 295" fill="none" stroke="#f97316" stroke-width="1" stroke-dasharray="3" opacity="0.5"/>
+
+                <!-- Labels on dashed lines -->
+                <text x="270" y="395" text-anchor="end" fill="#6366f1" font-size="8" opacity="0.7">create_session</text>
+                <text x="450" y="395" text-anchor="end" fill="#06b6d4" font-size="8" opacity="0.7">send_message</text>
+                <text x="660" y="395" text-anchor="start" fill="#f97316" font-size="8" opacity="0.7">send_message</text>
+
+                <!-- Arrow markers -->
+                <defs>
+                    <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6366f1"/></marker>
+                    <marker id="arrow-cyan" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#06b6d4"/></marker>
+                    <marker id="arrow-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#f97316"/></marker>
+                    <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#22c55e"/></marker>
+                </defs>
+            </svg>
+        </div>
+    </section>
+
+    <!-- ===== 8 VERIFICATION LAYERS ===== -->
+    <section class="section">
+        <h2 class="section-title">8 Verification Layers (Phase 2)</h2>
+        <div class="layers-grid">
+            <div class="layer-card">
+                <span class="layer-icon">&#128270;</span>
+                <div class="layer-name">Static Analysis</div>
+                <div class="layer-num-badge">Layer 1</div>
+            </div>
+            <div class="layer-card">
+                <span class="layer-icon">&#9200;</span>
+                <div class="layer-name">Staleness Check</div>
+                <div class="layer-num-badge">Layer 2</div>
+            </div>
+            <div class="layer-card">
+                <span class="layer-icon">&#128101;</span>
+                <div class="layer-name">Active Development</div>
+                <div class="layer-num-badge">Layer 3</div>
+            </div>
+            <div class="layer-card">
+                <span class="layer-icon">&#128279;</span>
+                <div class="layer-name">Dependency Graph</div>
+                <div class="layer-num-badge">Layer 4</div>
+            </div>
+            <div class="layer-card">
+                <span class="layer-icon">&#127919;</span>
+                <div class="layer-name">Runtime / Coverage</div>
+                <div class="layer-num-badge">Layer 5</div>
+            </div>
+            <div class="layer-card">
+                <span class="layer-icon">&#128218;</span>
+                <div class="layer-name">Documentation</div>
+                <div class="layer-num-badge">Layer 6</div>
+            </div>
+            <div class="layer-card">
+                <span class="layer-icon">&#128640;</span>
+                <div class="layer-name">Feature Flags</div>
+                <div class="layer-num-badge">Layer 7</div>
+            </div>
+            <div class="layer-card">
+                <span class="layer-icon">&#128736;</span>
+                <div class="layer-name">Cross-Reference</div>
+                <div class="layer-num-badge">Layer 8</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== OUTPUT TARGETS ===== -->
+    <section class="section">
+        <h2 class="section-title">Report Targets (Phase 4)</h2>
+        <div class="outputs-row">
+            <div class="output-card">
+                <span class="output-icon">&#128221;</span>
+                <h4>Notion Table</h4>
+                <p>Full findings DB with<br/>confidence &amp; layer status</p>
+            </div>
+            <div class="output-card">
+                <span class="output-icon">&#128172;</span>
+                <h4>Slack Alerts</h4>
+                <p>PR notifications with<br/>legacy reasons</p>
+            </div>
+            <div class="output-card">
+                <span class="output-icon">&#128196;</span>
+                <h4>GitHub PRs</h4>
+                <p>Auto-generated cleanup<br/>pull requests</p>
+            </div>
+            <div class="output-card">
+                <span class="output-icon">&#128190;</span>
+                <h4>JSON Artifacts</h4>
+                <p>Machine-readable results<br/>at every phase</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== CTA ===== -->
+    <section class="cta-section">
+        <h2>Ready to clean up your codebase?</h2>
+        <div class="cta-buttons">
+            <a href="/dashboard" class="btn btn-primary">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
+                Open Dashboard
+            </a>
+            <a href="/dashboard" class="btn btn-outline">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                Command &amp; Control
+            </a>
+        </div>
+    </section>
+
+    <footer>
+        DevinDemo &mdash; Feature-flag &amp; tech-debt scanner powered by Devin API
+    </footer>
+
+</body>
+</html>
