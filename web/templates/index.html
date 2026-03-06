@@ -331,6 +331,88 @@
             }
         }
 
+        /* Dashboard pipeline progress */
+        .pipeline-progress {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .pipeline-step {
+            flex: 1;
+            padding: 0.625rem 0.75rem;
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            transition: all 0.3s;
+        }
+
+        .pipeline-step:last-child {
+            border-right: none;
+        }
+
+        .pipeline-step.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .pipeline-step.done {
+            background: var(--green);
+            color: white;
+        }
+
+        .pipeline-step.failed {
+            background: var(--red);
+            color: white;
+        }
+
+        /* Dashboard 2x2 console grid */
+        .dashboard-consoles {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        @media (max-width: 800px) {
+            .dashboard-consoles {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .dashboard-consoles .console-wrapper {
+            margin: 0;
+        }
+
+        .dashboard-consoles .console-panel {
+            background: #0a0c10;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 0.8125rem;
+            line-height: 1.6;
+            height: 250px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #a8b2c4;
+        }
+
+        .dashboard-consoles .console-panel .cmd { color: var(--accent); }
+        .dashboard-consoles .console-panel .error { color: var(--red); }
+        .dashboard-consoles .console-panel .success { color: var(--green); }
+
+        .dashboard-consoles .console-panel::-webkit-scrollbar { width: 6px; }
+        .dashboard-consoles .console-panel::-webkit-scrollbar-track { background: transparent; }
+        .dashboard-consoles .console-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
         /* Stub notice */
         .stub-notice {
             background: var(--surface);
@@ -777,15 +859,93 @@
 
         <!-- Phase tabs -->
         <div class="tabs">
-            <button class="tab" data-phase="dashboard">Dashboard</button>
-            <button class="tab active" data-phase="scan">Phase 1: Scan</button>
+            <button class="tab active" data-phase="dashboard">Dashboard</button>
+            <button class="tab" data-phase="scan">Phase 1: Scan</button>
             <button class="tab" data-phase="validate">Phase 2: Validate</button>
             <button class="tab" data-phase="cleanup">Phase 3: Cleanup PR's</button>
             <button class="tab" data-phase="report">Phase 4: Report</button>
         </div>
 
+        <!-- Dashboard: Run All Phases -->
+        <div class="phase-panel active" id="panel-dashboard">
+            <div class="form-grid">
+                <div class="section-label">Run All Phases</div>
+                <div class="form-group full-width">
+                    <label>Repository <span class="required">*</span></label>
+                    <input type="text" id="runall-repo" placeholder="owner/repo" />
+                </div>
+
+                <button type="button" class="collapsible-toggle" onclick="toggleAdditionalOptions('runall')">
+                    <span class="arrow">&#9654;</span> Additional Options
+                </button>
+                <div class="collapsible-content" id="runall-additional-content">
+                    <div class="section-label">Devin API</div>
+                    <div class="form-group">
+                        <label>API Key (v3)</label>
+                        <input type="password" id="runall-api-key" placeholder="cog_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>API Key (v1)</label>
+                        <input type="password" id="runall-v1-api-key" placeholder="apk_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Organization ID</label>
+                        <input type="text" id="runall-org-id" placeholder="org-..." />
+                    </div>
+
+                    <div class="section-label">Notion (Phase 4)</div>
+                    <div class="form-group">
+                        <label>Notion API Key</label>
+                        <input type="password" id="runall-notion-api-key" placeholder="secret_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Notion Database ID</label>
+                        <input type="text" id="runall-notion-database-id" placeholder="Optional" />
+                    </div>
+                    <div class="form-group">
+                        <label>Notion Parent Page ID</label>
+                        <input type="text" id="runall-notion-parent-page-id" placeholder="Required if no Database ID" />
+                    </div>
+
+                    <div class="section-label">Slack (Phase 4)</div>
+                    <div class="form-group full-width">
+                        <label>Slack Webhook URL</label>
+                        <input type="text" id="runall-slack-webhook-url" placeholder="https://hooks.slack.com/services/..." />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pipeline progress indicator -->
+            <div class="pipeline-progress" id="pipeline-progress" style="display:none;">
+                <div class="pipeline-step" id="pipeline-step-0">Phase 1: Scan</div>
+                <div class="pipeline-step" id="pipeline-step-1">Phase 2: Validate</div>
+                <div class="pipeline-step" id="pipeline-step-2">Phase 3: Cleanup</div>
+                <div class="pipeline-step" id="pipeline-step-3">Phase 4: Report</div>
+            </div>
+
+            <!-- 2x2 per-phase console grid -->
+            <div class="dashboard-consoles">
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 1: Scan</h3></div>
+                    <div class="console-panel" id="console-scan"></div>
+                </div>
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 2: Validate</h3></div>
+                    <div class="console-panel" id="console-validate"></div>
+                </div>
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 3: Cleanup</h3></div>
+                    <div class="console-panel" id="console-cleanup"></div>
+                </div>
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 4: Report</h3></div>
+                    <div class="console-panel" id="console-report"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Phase 1: Scan -->
-        <div class="phase-panel active" id="panel-scan">
+        <div class="phase-panel" id="panel-scan">
             <div class="form-grid">
                 <div class="section-label">Scan Configuration</div>
                 <div class="form-group full-width">
@@ -1091,17 +1251,13 @@
             </div>
         </div>
 
-        <!-- Dashboard: shows all 4 consoles in a grid -->
-        <div class="phase-panel" id="panel-dashboard">
-            <div class="console-grid" id="dashboard-grid"></div>
-        </div>
-
         </div><!-- end mode-cnc -->
     </div>
 
     <script>
         const socket = io();
-        let currentPhase = 'scan';
+        let currentPhase = 'dashboard';
+        let runAllActive = false;
 
         // Per-phase running state
         const phaseRunning = { scan: false, validate: false, cleanup: false, report: false };
@@ -1388,6 +1544,44 @@
         // Register listeners for each phase
         ['scan', 'validate', 'cleanup', 'report'].forEach(setupPhaseConsole);
 
+        // Also listen for console_output (used by run_all pipeline with phase field)
+        socket.on('console_output', (msg) => {
+            const text = msg.data;
+            const phase = msg.phase;
+            if (phase && runAllActive) {
+                const dashPanel = document.getElementById('console-' + phase);
+                if (dashPanel) {
+                    const span = document.createElement('span');
+                    if (text.startsWith('$')) span.className = 'cmd';
+                    span.textContent = text;
+                    dashPanel.appendChild(span);
+                    dashPanel.scrollTop = dashPanel.scrollHeight;
+                }
+            }
+        });
+
+        // Listen for process_done from run_all pipeline
+        socket.on('process_done', (msg) => {
+            if (runAllActive) {
+                runAllActive = false;
+                document.getElementById('btn-run-all').disabled = false;
+                document.getElementById('btn-stop-all').style.display = 'none';
+                if (msg.success) {
+                    for (let i = 0; i < 4; i++) {
+                        document.getElementById('pipeline-step-' + i).className = 'pipeline-step done';
+                    }
+                } else {
+                    for (let i = 0; i < 4; i++) {
+                        const step = document.getElementById('pipeline-step-' + i);
+                        if (step.classList.contains('active')) {
+                            step.className = 'pipeline-step failed';
+                        }
+                    }
+                }
+                loadAllDropdowns();
+            }
+        });
+
         // ----- Helpers -----
 
         function getVal(id) {
@@ -1399,6 +1593,59 @@
             const v = getVal(id);
             return v ? parseInt(v, 10) : null;
         }
+
+        // ----- Run All -----
+
+        function runAll() {
+            if (runAllActive) return;
+
+            const repo = getVal('runall-repo');
+            if (!repo) {
+                alert('Repository is required.');
+                return;
+            }
+
+            const args = {
+                repo: repo,
+                api_key: getVal('runall-api-key') || null,
+                v1_api_key: getVal('runall-v1-api-key') || null,
+                org_id: getVal('runall-org-id') || null,
+                notion_api_key: getVal('runall-notion-api-key') || null,
+                notion_database_id: getVal('runall-notion-database-id') || null,
+                notion_parent_page_id: getVal('runall-notion-parent-page-id') || null,
+                slack_webhook_url: getVal('runall-slack-webhook-url') || null,
+            };
+
+            runAllActive = true;
+            document.getElementById('btn-run-all').disabled = true;
+            document.getElementById('btn-stop-all').style.display = 'inline-block';
+
+            // Show and reset pipeline progress
+            const progress = document.getElementById('pipeline-progress');
+            progress.style.display = 'flex';
+            for (let i = 0; i < 4; i++) {
+                document.getElementById('pipeline-step-' + i).className = 'pipeline-step';
+            }
+
+            socket.emit('run_all', { args: args });
+        }
+
+        // Listen for phase progress updates from run_all
+        socket.on('run_all_phase', (msg) => {
+            const idx = msg.phase_index;
+            // Mark previous steps as done
+            for (let i = 0; i < idx; i++) {
+                const step = document.getElementById('pipeline-step-' + i);
+                if (step && !step.classList.contains('failed')) {
+                    step.className = 'pipeline-step done';
+                }
+            }
+            // Mark current step as active
+            const currentStep = document.getElementById('pipeline-step-' + idx);
+            if (currentStep) {
+                currentStep.className = 'pipeline-step active';
+            }
+        });
 
         // ----- Run / Stop / Clear per phase -----
 
@@ -1528,6 +1775,14 @@
 
         function clearConsole(phase) {
             if (!phase) phase = currentPhase;
+            if (phase === 'dashboard') {
+                // Clear all dashboard per-phase consoles
+                ['scan', 'validate', 'cleanup', 'report'].forEach(p => {
+                    const el = document.getElementById('console-' + p);
+                    if (el) el.innerHTML = '';
+                });
+                return;
+            }
             const el = document.getElementById('console-' + phase);
             if (el) el.innerHTML = '';
             const dot = document.getElementById('status-dot-' + phase);
