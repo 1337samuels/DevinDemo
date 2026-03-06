@@ -233,7 +233,9 @@ def cmd_validate(args: argparse.Namespace) -> None:
         print(f"Invalid JSON in {args.input}: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    client = DevinAPIClient(api_key=args.api_key, org_id=args.org_id)
+    client = DevinAPIClient(
+        api_key=args.api_key, org_id=args.org_id, v1_api_key=args.v1_api_key
+    )
 
     # Build optional config overrides
     config: dict[str, int] = {}
@@ -265,10 +267,11 @@ def cmd_validate(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(3)
 
-    if args.output:
-        with open(args.output, "w") as fh:
-            json.dump(results, fh, indent=2)
-        print(f"\nFull validated results written to {args.output}")
+    output_path = args.output or _default_output_path("validate")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as fh:
+        json.dump(results, fh, indent=2)
+    print(f"\nFull validated results written to {output_path}")
 
 
 def cmd_cleanup(args: argparse.Namespace) -> None:
