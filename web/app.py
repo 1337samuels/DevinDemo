@@ -13,6 +13,14 @@ import threading
 from flask import Flask, jsonify, render_template
 from flask_socketio import SocketIO, emit
 
+# Ensure the project root is on sys.path so ``from src.…`` works even when
+# this file is executed directly (e.g. ``python web/app.py``).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from src.validator.validator import ALL_LAYER_NUMBERS, LAYER_LABELS  # noqa: E402
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "devindemo-gui"
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -21,8 +29,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 _current_process: subprocess.Popen | None = None
 _process_lock = threading.Lock()
 
-# Path to the project root (one level up from web/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = _PROJECT_ROOT
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
 # Regex to parse default output filenames: <prefix>_YYYYMMDD_HHMMSS.json
@@ -85,6 +92,15 @@ def _discover_result_files(prefix: str) -> list[dict]:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/validation-layers")
+def api_validation_layers():
+    """Return the available validation layers with labels."""
+    return jsonify([
+        {"number": n, "label": LAYER_LABELS[n]}
+        for n in ALL_LAYER_NUMBERS
+    ])
 
 
 @app.route("/api/results/<prefix>")
@@ -236,6 +252,8 @@ def handle_run_phase(data):
             cmd.extend(["--pr-lookback-days", str(args["pr_lookback_days"])])
         if args.get("issue_lookback_days"):
             cmd.extend(["--issue-lookback-days", str(args["issue_lookback_days"])])
+        if args.get("layers"):
+            cmd.extend(["--layers", args["layers"]])
 
     elif phase == "cleanup":
         cmd.append("cleanup")

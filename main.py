@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from src.api.client import DevinAPIClient, DevinAPIError
 from src.reporter.reporter import DebtReporter
 from src.scanner.identifier import FeatureFlagScanner
-from src.validator.validator import LegacyCodeValidator
+from src.validator.validator import ALL_LAYER_NUMBERS, LAYER_LABELS, LegacyCodeValidator
 
 
 class ProgressTracker:
@@ -203,7 +203,14 @@ def cmd_validate(args: argparse.Namespace) -> None:
     if args.issue_lookback_days is not None:
         config["issue_lookback_days"] = args.issue_lookback_days
 
-    validator = LegacyCodeValidator(client, config=config if config else None)
+    # Parse selected layers
+    selected_layers = None
+    if args.layers is not None:
+        selected_layers = args.layers
+
+    validator = LegacyCodeValidator(
+        client, config=config if config else None, selected_layers=selected_layers
+    )
 
     try:
         results = validator.validate(
@@ -401,6 +408,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Override issue lookback period in days (default: 180).",
+    )
+
+    # Build layer choices help text
+    layer_help_parts = [f"{n}: {LAYER_LABELS[n]}" for n in ALL_LAYER_NUMBERS]
+    validate_p.add_argument(
+        "--layers",
+        type=lambda s: [int(x.strip()) for x in s.split(",")],
+        default=None,
+        help=(
+            "Comma-separated list of validation layer numbers to run "
+            "(default: all). Choices: " + "; ".join(layer_help_parts) + "."
+        ),
     )
     validate_p.set_defaults(func=cmd_validate)
 
