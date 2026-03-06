@@ -38,6 +38,31 @@ has four stages:
 > **Note:** `cog_*` keys do **not** work with the v1 API, and `apk_*` / `apk_user_*` keys do **not** work with the v3 API.
 > See the [authentication docs](https://docs.devin.ai/api-reference/authentication) for details.
 
+### `secrets.txt` (recommended)
+
+Instead of passing API keys on every command, create a `secrets.txt` file in the
+project root.  The CLI will automatically load it and fill in any missing flags.
+
+```text
+NOTION_SECRET = "ntn_..."
+NOTION_MASTER_PAGE_ID = "31b37812..."
+
+API_V3_KEY = "cog_..."
+ORG_ID = "org-..."
+API_V1_KEY = "apk_..."
+```
+
+| Key                    | Maps to CLI flag           | Phases |
+|------------------------|----------------------------|--------|
+| `API_V3_KEY`           | `--api-key`                | 1-3    |
+| `API_V1_KEY`           | `--v1-api-key`             | 1-3    |
+| `ORG_ID`               | `--org-id`                 | 1-3    |
+| `NOTION_SECRET`        | `--notion-api-key`         | 4      |
+| `NOTION_MASTER_PAGE_ID`| `--notion-parent-page-id`  | 4      |
+
+> **Important:** `secrets.txt` is listed in `.gitignore` and must **never** be
+> committed.  CLI flags always take precedence over `secrets.txt` values.
+
 ## Quick start
 
 ```bash
