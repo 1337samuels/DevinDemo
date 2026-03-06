@@ -12,18 +12,95 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 
 from src.api.client import DevinAPIClient, DevinAPIError
 from src.scanner.identifier import FeatureFlagScanner
 
 
-def _status_callback(session: dict) -> None:
-    """Print a one-liner whenever the session status changes."""
-    status = session.get("status", "?")
-    detail = session.get("status_detail", "")
-    sid = session.get("session_id", "?")
-    suffix = f" ({detail})" if detail else ""
-    print(f"[poll] {sid}: {status}{suffix}")
+class ProgressTracker:
+    """Stateful callback that prints rich progress during polling.
+
+    Extracts partial results from the session's ``structured_output``
+    (which Devin populates incrementally) and displays:
+    - Current status and elapsed time
+    - Files scanned so far
+    - Running counts of feature flags, dead code, and tech debt found
+    - Estimated time remaining (once files_scanned starts growing)
+    """
+
+    def __init__(self) -> None:
+        self._start = time.monotonic()
+        self._poll_count = 0
+        self._prev_files = 0
+        self._prev_status = ""
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s" if m else f"{s}s"
+
+    def __call__(self, session: dict) -> None:  # noqa: C901
+        self._poll_count += 1
+        elapsed = time.monotonic() - self._start
+
+        status = session.get("status", "?")
+        detail = session.get("status_detail", "")
+        status_str = f"{status} ({detail})" if detail else status
+
+        # -- Extract progress from structured_output if available --
+        output = session.get("structured_output")
+        if output is None:
+            # No structured output yet — just show status + elapsed
+            print(
+                f"  [{self._fmt_elapsed(elapsed)}] {status_str}"
+                f"  | Waiting for scan to start …"
+            )
+            return
+
+        summary = output.get("summary", {})
+        files_scanned = summary.get("files_scanned", 0)
+        n_flags = summary.get(
+            "total_feature_flags", len(output.get("feature_flags", []))
+        )
+        n_dead = summary.get("total_dead_code", len(output.get("dead_code", [])))
+        n_debt = summary.get("total_tech_debt", len(output.get("tech_debt", [])))
+        total_findings = n_flags + n_dead + n_debt
+
+        # -- ETA estimation based on files_scanned growth rate --
+        eta_str = "unknown"
+        if files_scanned > 0 and files_scanned > self._prev_files:
+            rate = files_scanned / elapsed  # files per second
+            # Rough heuristic: assume total files ≈ 2× what we've seen so far
+            # (since we don't know the total). Once we see no new files for
+            # two polls, we assume we're nearly done.
+            if rate > 0:
+                # Estimate remaining as "at least a few more polls"
+                remaining_est = max(15, elapsed * 0.3)  # conservative
+                eta_str = f"~{self._fmt_elapsed(remaining_est)}"
+
+        if files_scanned > 0 and files_scanned == self._prev_files:
+            # No new files since last poll — likely finishing up
+            eta_str = "finishing up"
+
+        self._prev_files = files_scanned
+
+        # -- Build progress bar from findings --
+        bar_parts = []
+        if n_flags:
+            bar_parts.append(f"flags:{n_flags}")
+        if n_dead:
+            bar_parts.append(f"dead:{n_dead}")
+        if n_debt:
+            bar_parts.append(f"debt:{n_debt}")
+        findings_str = ", ".join(bar_parts) if bar_parts else "none yet"
+
+        print(
+            f"  [{self._fmt_elapsed(elapsed)}] {status_str}"
+            f"  | Files: {files_scanned}"
+            f"  | Findings: {total_findings} ({findings_str})"
+            f"  | ETA: {eta_str}"
+        )
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
@@ -31,13 +108,14 @@ def cmd_scan(args: argparse.Namespace) -> None:
     client = DevinAPIClient(api_key=args.api_key, org_id=args.org_id)
     scanner = FeatureFlagScanner(client)
 
+    tracker = ProgressTracker()
     try:
         results = scanner.scan(
             repo=args.repo,
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
             max_acu_limit=args.max_acu,
-            on_status_update=_status_callback,
+            on_status_update=tracker,
         )
     except DevinAPIError as exc:
         print(f"Devin API error: {exc}", file=sys.stderr)
