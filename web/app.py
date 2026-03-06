@@ -353,16 +353,26 @@ def _find_latest_result(prefix: str) -> str | None:
     return candidates[0]
 
 
-def _run_phase_subprocess(cmd: list[str], sid: str) -> int:
+def _run_phase_subprocess(cmd: list[str], sid: str, phase: str | None = None) -> int:
     """Run a subprocess, stream output to *sid*, and return the exit code.
 
     Unlike ``_stream_process`` this does **not** emit ``process_done`` and
     does **not** update ``_current_process`` — the caller (``_run_all_pipeline``)
     manages the process reference and decides whether to continue.
+
+    When *phase* is provided the ``console_output`` payload includes a
+    ``phase`` key so the frontend can route the output to the correct
+    per-phase console panel.
     """
     global _current_process
 
-    socketio.emit("console_output", {"data": f"$ {_mask_cmd(cmd)}\n"}, to=sid)
+    def _emit_console(text: str) -> None:
+        payload: dict = {"data": text}
+        if phase:
+            payload["phase"] = phase
+        socketio.emit("console_output", payload, to=sid)
+
+    _emit_console(f"$ {_mask_cmd(cmd)}\n")
 
     try:
         proc = subprocess.Popen(
@@ -379,12 +389,12 @@ def _run_phase_subprocess(cmd: list[str], sid: str) -> int:
             _current_process = proc
 
         for line in proc.stdout:
-            socketio.emit("console_output", {"data": line}, to=sid)
+            _emit_console(line)
 
         proc.wait()
         return proc.returncode
     except Exception as exc:
-        socketio.emit("console_output", {"data": f"\nError: {exc}\n"}, to=sid)
+        _emit_console(f"\nError: {exc}\n")
         return -1
     finally:
         with _process_lock:
@@ -408,10 +418,14 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
     notion_parent_page_id = args.get("notion_parent_page_id") or None
     slack_webhook_url = args.get("slack_webhook_url") or None
 
+    phase_ids = ["scan", "validate", "cleanup", "report"]
+
     def _header(phase_idx: int) -> None:
         name = _PHASE_NAMES[phase_idx]
+        pid = phase_ids[phase_idx]
         socketio.emit("console_output", {
             "data": f"\n{'=' * 60}\n  {name}\n{'=' * 60}\n\n",
+            "phase": pid,
         }, to=sid)
         socketio.emit("run_all_phase", {"phase_index": phase_idx}, to=sid)
 
@@ -426,7 +440,7 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
         cmd_scan.extend(["--org-id", org_id])
     cmd_scan.append(repo)
 
-    rc = _run_phase_subprocess(cmd_scan, sid)
+    rc = _run_phase_subprocess(cmd_scan, sid, phase="scan")
     if rc != 0:
         socketio.emit("process_done", {
             "data": f"\nPipeline stopped: Phase 1 (Scan) failed with exit code {rc}\n",
@@ -453,7 +467,7 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
         cmd_validate.extend(["--org-id", org_id])
     cmd_validate.append(scan_output)
 
-    rc = _run_phase_subprocess(cmd_validate, sid)
+    rc = _run_phase_subprocess(cmd_validate, sid, phase="validate")
     if rc != 0:
         socketio.emit("process_done", {
             "data": f"\nPipeline stopped: Phase 2 (Validate) failed with exit code {rc}\n",
@@ -480,7 +494,7 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
         cmd_cleanup.extend(["--org-id", org_id])
     cmd_cleanup.append(validate_output)
 
-    rc = _run_phase_subprocess(cmd_cleanup, sid)
+    rc = _run_phase_subprocess(cmd_cleanup, sid, phase="cleanup")
     if rc != 0:
         socketio.emit("process_done", {
             "data": f"\nPipeline stopped: Phase 3 (Cleanup) failed with exit code {rc}\n",
@@ -504,7 +518,7 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
     if slack_webhook_url:
         cmd_report.extend(["--slack-webhook-url", slack_webhook_url])
 
-    rc = _run_phase_subprocess(cmd_report, sid)
+    rc = _run_phase_subprocess(cmd_report, sid, phase="report")
     if rc != 0:
         socketio.emit("process_done", {
             "data": f"\nPipeline stopped: Phase 4 (Report) failed with exit code {rc}\n",

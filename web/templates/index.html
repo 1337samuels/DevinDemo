@@ -343,6 +343,47 @@
             color: white;
         }
 
+        /* Dashboard 2x2 console grid */
+        .dashboard-consoles {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        @media (max-width: 800px) {
+            .dashboard-consoles {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .dashboard-consoles .console-wrapper {
+            margin: 0;
+        }
+
+        .dashboard-consoles .console-panel {
+            background: #0a0c10;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 0.8125rem;
+            line-height: 1.6;
+            height: 250px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #a8b2c4;
+        }
+
+        .dashboard-consoles .console-panel .cmd { color: var(--accent); }
+        .dashboard-consoles .console-panel .error { color: var(--red); }
+        .dashboard-consoles .console-panel .success { color: var(--green); }
+
+        .dashboard-consoles .console-panel::-webkit-scrollbar { width: 6px; }
+        .dashboard-consoles .console-panel::-webkit-scrollbar-track { background: transparent; }
+        .dashboard-consoles .console-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
         /* Stub notice */
         .stub-notice {
             background: var(--surface);
@@ -548,6 +589,26 @@
                 <div class="pipeline-step" id="pipeline-step-1">Phase 2: Validate</div>
                 <div class="pipeline-step" id="pipeline-step-2">Phase 3: Cleanup</div>
                 <div class="pipeline-step" id="pipeline-step-3">Phase 4: Report</div>
+            </div>
+
+            <!-- 2x2 per-phase console grid -->
+            <div class="dashboard-consoles">
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 1: Scan</h3></div>
+                    <div class="console-panel" id="console-scan"></div>
+                </div>
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 2: Validate</h3></div>
+                    <div class="console-panel" id="console-validate"></div>
+                </div>
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 3: Cleanup</h3></div>
+                    <div class="console-panel" id="console-cleanup"></div>
+                </div>
+                <div class="console-wrapper">
+                    <div class="console-header"><h3>Phase 4: Report</h3></div>
+                    <div class="console-panel" id="console-report"></div>
+                </div>
             </div>
         </div>
 
@@ -1034,16 +1095,28 @@
         const statusDot = document.getElementById('status-dot');
 
         socket.on('console_output', (msg) => {
-            const span = document.createElement('span');
             const text = msg.data;
+            const phase = msg.phase; // set during run_all pipeline
 
-            if (text.startsWith('$')) {
-                span.className = 'cmd';
+            // Determine which console(s) to write to
+            const targets = [];
+            if (phase && runAllActive) {
+                // Route to the per-phase dashboard console
+                const dashPanel = document.getElementById('console-' + phase);
+                if (dashPanel) targets.push(dashPanel);
             }
+            // Always write to the shared console as well
+            targets.push(consoleEl);
 
-            span.textContent = text;
-            consoleEl.appendChild(span);
-            consoleEl.scrollTop = consoleEl.scrollHeight;
+            targets.forEach(target => {
+                const span = document.createElement('span');
+                if (text.startsWith('$')) {
+                    span.className = 'cmd';
+                }
+                span.textContent = text;
+                target.appendChild(span);
+                target.scrollTop = target.scrollHeight;
+            });
         });
 
         socket.on('process_done', (msg) => {
@@ -1272,6 +1345,11 @@
         function clearConsole() {
             consoleEl.innerHTML = '';
             statusDot.className = 'status-dot';
+            // Also clear dashboard per-phase consoles
+            ['scan', 'validate', 'cleanup', 'report'].forEach(p => {
+                const el = document.getElementById('console-' + p);
+                if (el) el.innerHTML = '';
+            });
         }
     </script>
 </body>
