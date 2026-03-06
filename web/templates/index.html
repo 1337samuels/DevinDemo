@@ -302,6 +302,47 @@
         #console::-webkit-scrollbar-track { background: transparent; }
         #console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+        /* Dashboard pipeline progress */
+        .pipeline-progress {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .pipeline-step {
+            flex: 1;
+            padding: 0.625rem 0.75rem;
+            text-align: center;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            transition: all 0.3s;
+        }
+
+        .pipeline-step:last-child {
+            border-right: none;
+        }
+
+        .pipeline-step.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .pipeline-step.done {
+            background: var(--green);
+            color: white;
+        }
+
+        .pipeline-step.failed {
+            background: var(--red);
+            color: white;
+        }
+
         /* Stub notice */
         .stub-notice {
             background: var(--surface);
@@ -445,14 +486,73 @@
 
         <!-- Phase tabs -->
         <div class="tabs">
-            <button class="tab active" data-phase="scan">Phase 1: Scan</button>
+            <button class="tab active" data-phase="dashboard">Dashboard</button>
+            <button class="tab" data-phase="scan">Phase 1: Scan</button>
             <button class="tab" data-phase="validate">Phase 2: Validate</button>
             <button class="tab" data-phase="cleanup">Phase 3: Cleanup</button>
             <button class="tab" data-phase="report">Phase 4: Report</button>
         </div>
 
+        <!-- Dashboard: Run All Phases -->
+        <div class="phase-panel active" id="panel-dashboard">
+            <div class="form-grid">
+                <div class="section-label">Run All Phases</div>
+                <div class="form-group full-width">
+                    <label>Repository <span class="required">*</span></label>
+                    <input type="text" id="runall-repo" placeholder="owner/repo" />
+                </div>
+
+                <button type="button" class="collapsible-toggle" onclick="toggleAdditionalOptions('runall')">
+                    <span class="arrow">&#9654;</span> Additional Options
+                </button>
+                <div class="collapsible-content" id="runall-additional-content">
+                    <div class="section-label">Devin API</div>
+                    <div class="form-group">
+                        <label>API Key (v3)</label>
+                        <input type="password" id="runall-api-key" placeholder="cog_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>API Key (v1)</label>
+                        <input type="password" id="runall-v1-api-key" placeholder="apk_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Organization ID</label>
+                        <input type="text" id="runall-org-id" placeholder="org-..." />
+                    </div>
+
+                    <div class="section-label">Notion (Phase 4)</div>
+                    <div class="form-group">
+                        <label>Notion API Key</label>
+                        <input type="password" id="runall-notion-api-key" placeholder="secret_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Notion Database ID</label>
+                        <input type="text" id="runall-notion-database-id" placeholder="Optional" />
+                    </div>
+                    <div class="form-group">
+                        <label>Notion Parent Page ID</label>
+                        <input type="text" id="runall-notion-parent-page-id" placeholder="Required if no Database ID" />
+                    </div>
+
+                    <div class="section-label">Slack (Phase 4)</div>
+                    <div class="form-group full-width">
+                        <label>Slack Webhook URL</label>
+                        <input type="text" id="runall-slack-webhook-url" placeholder="https://hooks.slack.com/services/..." />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pipeline progress indicator -->
+            <div class="pipeline-progress" id="pipeline-progress" style="display:none;">
+                <div class="pipeline-step" id="pipeline-step-0">Phase 1: Scan</div>
+                <div class="pipeline-step" id="pipeline-step-1">Phase 2: Validate</div>
+                <div class="pipeline-step" id="pipeline-step-2">Phase 3: Cleanup</div>
+                <div class="pipeline-step" id="pipeline-step-3">Phase 4: Report</div>
+            </div>
+        </div>
+
         <!-- Phase 1: Scan -->
-        <div class="phase-panel active" id="panel-scan">
+        <div class="phase-panel" id="panel-scan">
             <div class="form-grid">
                 <div class="section-label">Scan Configuration</div>
                 <div class="form-group full-width">
@@ -706,10 +806,17 @@
             </div>
         </div>
 
-        <!-- Actions -->
-        <div class="actions">
+        <!-- Actions: single phase -->
+        <div class="actions" id="actions-single" style="display:none;">
             <button class="btn btn-primary" id="btn-run" onclick="runPhase()">Run</button>
             <button class="btn btn-danger" id="btn-stop" onclick="stopProcess()" style="display:none;">Stop</button>
+            <button class="btn btn-secondary" onclick="clearConsole()">Clear Console</button>
+        </div>
+
+        <!-- Actions: run all (dashboard) -->
+        <div class="actions" id="actions-runall">
+            <button class="btn btn-primary" id="btn-run-all" onclick="runAll()">Run All Phases</button>
+            <button class="btn btn-danger" id="btn-stop-all" onclick="stopProcess()" style="display:none;">Stop</button>
             <button class="btn btn-secondary" onclick="clearConsole()">Clear Console</button>
         </div>
 
@@ -724,8 +831,9 @@
 
     <script>
         const socket = io();
-        let currentPhase = 'scan';
+        let currentPhase = 'dashboard';
         let isRunning = false;
+        let runAllActive = false;
 
         // ----- Validation layer checkboxes -----
 
@@ -909,6 +1017,14 @@
                 tab.classList.add('active');
                 currentPhase = tab.dataset.phase;
                 document.getElementById('panel-' + currentPhase).classList.add('active');
+                // Show/hide the correct action buttons
+                if (currentPhase === 'dashboard') {
+                    document.getElementById('actions-single').style.display = 'none';
+                    document.getElementById('actions-runall').style.display = 'flex';
+                } else {
+                    document.getElementById('actions-single').style.display = 'flex';
+                    document.getElementById('actions-runall').style.display = 'none';
+                }
                 loadAllDropdowns();
             });
         });
@@ -939,8 +1055,29 @@
 
             isRunning = false;
             statusDot.className = msg.success ? 'status-dot success' : 'status-dot error';
-            document.getElementById('btn-run').disabled = false;
-            document.getElementById('btn-stop').style.display = 'none';
+
+            if (runAllActive) {
+                runAllActive = false;
+                document.getElementById('btn-run-all').disabled = false;
+                document.getElementById('btn-stop-all').style.display = 'none';
+                // Update pipeline progress on completion
+                if (msg.success) {
+                    for (let i = 0; i < 4; i++) {
+                        document.getElementById('pipeline-step-' + i).className = 'pipeline-step done';
+                    }
+                } else {
+                    // Mark the currently active step as failed
+                    for (let i = 0; i < 4; i++) {
+                        const step = document.getElementById('pipeline-step-' + i);
+                        if (step.classList.contains('active')) {
+                            step.className = 'pipeline-step failed';
+                        }
+                    }
+                }
+            } else {
+                document.getElementById('btn-run').disabled = false;
+                document.getElementById('btn-stop').style.display = 'none';
+            }
             // Refresh dropdowns after process finishes (new result files may exist)
             loadAllDropdowns();
         });
@@ -954,6 +1091,61 @@
             const v = getVal(id);
             return v ? parseInt(v, 10) : null;
         }
+
+        // ----- Run All -----
+
+        function runAll() {
+            if (isRunning) return;
+
+            const repo = getVal('runall-repo');
+            if (!repo) {
+                alert('Repository is required.');
+                return;
+            }
+
+            const args = {
+                repo: repo,
+                api_key: getVal('runall-api-key') || null,
+                v1_api_key: getVal('runall-v1-api-key') || null,
+                org_id: getVal('runall-org-id') || null,
+                notion_api_key: getVal('runall-notion-api-key') || null,
+                notion_database_id: getVal('runall-notion-database-id') || null,
+                notion_parent_page_id: getVal('runall-notion-parent-page-id') || null,
+                slack_webhook_url: getVal('runall-slack-webhook-url') || null,
+            };
+
+            isRunning = true;
+            runAllActive = true;
+            statusDot.className = 'status-dot running';
+            document.getElementById('btn-run-all').disabled = true;
+            document.getElementById('btn-stop-all').style.display = 'inline-block';
+
+            // Show and reset pipeline progress
+            const progress = document.getElementById('pipeline-progress');
+            progress.style.display = 'flex';
+            for (let i = 0; i < 4; i++) {
+                document.getElementById('pipeline-step-' + i).className = 'pipeline-step';
+            }
+
+            socket.emit('run_all', { args: args });
+        }
+
+        // Listen for phase progress updates from run_all
+        socket.on('run_all_phase', (msg) => {
+            const idx = msg.phase_index;
+            // Mark previous steps as done
+            for (let i = 0; i < idx; i++) {
+                const step = document.getElementById('pipeline-step-' + i);
+                if (step && !step.classList.contains('failed')) {
+                    step.className = 'pipeline-step done';
+                }
+            }
+            // Mark current step as active
+            const currentStep = document.getElementById('pipeline-step-' + idx);
+            if (currentStep) {
+                currentStep.className = 'pipeline-step active';
+            }
+        });
 
         function runPhase() {
             if (isRunning) return;
