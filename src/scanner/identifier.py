@@ -408,14 +408,21 @@ class FeatureFlagScanner:
         if batch_size is None:
             batch_size = self.DEFAULT_BATCH_SIZE
 
-        # ---- Create session with discovery prompt ----
-        discovery_prompt = _DISCOVERY_PROMPT.format(repo=repo)
+        # ---- Create session with a neutral setup prompt ----
+        # We intentionally do NOT pass structured_output_schema here
+        # because the schema describes scan results and would cause
+        # Devin to start scanning files immediately instead of just
+        # listing them.  All results are extracted from message text.
+        setup_prompt = (
+            f"You are a code-quality scanning assistant for the "
+            f"repository **{repo}**.  Wait for my instructions "
+            f"before doing anything."
+        )
 
         print(f"[scanner] Creating session for {repo} ...")
         session = self._client.create_session(
-            prompt=discovery_prompt,
+            prompt=setup_prompt,
             repos=[repo],
-            structured_output_schema=SCAN_OUTPUT_SCHEMA,
             tags=["feature-flag-scan", "automated"],
             title=f"Code scan: {repo}",
             max_acu_limit=max_acu_limit,
@@ -424,8 +431,31 @@ class FeatureFlagScanner:
         print(f"[scanner] Session: {session_id}")
         print(f"[scanner] URL: {session.get('url', '')}")
 
-        # ---- Phase 1: Wait for discovery response ----
+        # Wait for session to be ready (claimed / waiting_for_user)
+        print("[scanner] Waiting for session to initialise ...")
+        phase0_start = time.monotonic()
+
+        def _setup_status(sess: dict[str, Any]) -> None:
+            elapsed = time.monotonic() - phase0_start
+            status = sess.get("status", "")
+            detail = sess.get("status_detail", "")
+            print(
+                f"  [{_fmt_elapsed(elapsed)}] {status}"
+                f" ({detail})  | Initialising session ..."
+            )
+
+        self._client.poll_session(
+            session_id,
+            interval=poll_interval,
+            timeout=poll_timeout,
+            on_update=_setup_status,
+        )
+
+        # ---- Phase 1: Send discovery prompt ----
         print("[scanner] Phase 1: discovering .py files ...")
+        discovery_prompt = _DISCOVERY_PROMPT.format(repo=repo)
+        self._client.send_message(session_id, discovery_prompt)
+
         phase1_start = time.monotonic()
 
         def _discovery_status(sess: dict[str, Any]) -> None:
