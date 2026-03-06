@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.api.client import DevinAPIClient, DevinAPIError
+from src.cleanup.cleanup import CleanupPRGenerator
 from src.reporter.reporter import DebtReporter
 from src.scanner.identifier import FeatureFlagScanner
 from src.validator.validator import ALL_LAYER_NUMBERS, LAYER_LABELS, LegacyCodeValidator
@@ -239,10 +240,98 @@ def cmd_validate(args: argparse.Namespace) -> None:
     print(f"\nFull validated results written to {output_path}")
 
 
+class CleanupProgressTrackerFactory:
+    """Progress tracker factory for the cleanup phase (Part 3)."""
+
+    def __call__(
+        self,
+        finding_idx: int,
+        total_findings: int,
+        candidate_id: str,
+    ) -> "_CleanupProgressCallback":
+        return _CleanupProgressCallback(
+            finding_idx, total_findings, candidate_id
+        )
+
+
+class _CleanupProgressCallback:
+    """Per-finding progress callback for the cleanup phase."""
+
+    def __init__(
+        self,
+        finding_idx: int,
+        total_findings: int,
+        candidate_id: str,
+    ) -> None:
+        self._finding_idx = finding_idx
+        self._total = total_findings
+        self._candidate_id = candidate_id
+        self._start = time.monotonic()
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s" if m else f"{s}s"
+
+    def __call__(self, session: dict) -> None:
+        elapsed = time.monotonic() - self._start
+        status = session.get("status", "")
+        detail = session.get("status_detail", "")
+        print(
+            f"  [{self._fmt_elapsed(elapsed)}] {status}"
+            f" ({detail})"
+            f"  | Finding {self._finding_idx}/{self._total}"
+            f"  | {self._candidate_id}"
+        )
+
+
 def cmd_cleanup(args: argparse.Namespace) -> None:
-    """Generate cleanup PRs (Part 3) — not yet implemented."""
-    print("Cleanup PR generation is not yet implemented.", file=sys.stderr)
-    sys.exit(1)
+    """Generate cleanup PRs for HIGH-confidence findings (Part 3)."""
+    # Load Phase 2 validated findings
+    try:
+        with open(args.input, "r") as fh:
+            findings = json.load(fh)
+    except FileNotFoundError:
+        print(f"Input file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as exc:
+        print(f"Invalid JSON in {args.input}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    client = DevinAPIClient(
+        api_key=args.api_key, org_id=args.org_id, v1_api_key=args.v1_api_key
+    )
+
+    generator = CleanupPRGenerator(client)
+
+    try:
+        cleanup_results = generator.generate_prs(
+            findings,
+            poll_interval=args.poll_interval,
+            poll_timeout=args.poll_timeout,
+            max_acu_limit=args.max_acu,
+            progress_tracker_factory=CleanupProgressTrackerFactory(),
+        )
+    except DevinAPIError as exc:
+        print(f"Devin API error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except TimeoutError as exc:
+        print(f"Timeout: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    # Write cleanup results JSON
+    output_path = args.output or _default_output_path("cleanup")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as fh:
+        json.dump(cleanup_results, fh, indent=2)
+    print(f"\nCleanup results written to {output_path}")
+
+    # Print opened PR links
+    opened = [r for r in cleanup_results if r["status"] == "pr_opened"]
+    if opened:
+        print(f"\nOpened {len(opened)} PR(s):")
+        for r in opened:
+            print(f"  - {r['candidate_id']}: {r['pr_url']}")
 
 
 def cmd_report(args: argparse.Namespace) -> None:
@@ -492,11 +581,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_p.set_defaults(func=cmd_validate)
 
-    # ---- cleanup (Part 3 — stub) ----
+    # ---- cleanup (Part 3) ----
     cleanup_p = subparsers.add_parser(
-        "cleanup", help="[NOT YET IMPLEMENTED] Generate cleanup PRs."
+        "cleanup",
+        help="Generate cleanup PRs for HIGH-confidence findings.",
     )
     _add_devin_api_args(cleanup_p, secrets)
+    cleanup_p.add_argument(
+        "input",
+        help="Path to the Phase 2 validated findings JSON file.",
+    )
+    cleanup_p.add_argument(
+        "--output", "-o",
+        help="Write cleanup results JSON to this file.",
+    )
+    cleanup_p.add_argument(
+        "--poll-interval",
+        type=int,
+        default=15,
+        help="Seconds between status polls (default: 15).",
+    )
+    cleanup_p.add_argument(
+        "--poll-timeout",
+        type=int,
+        default=900,
+        help="Max seconds to wait per finding (default: 900).",
+    )
+    cleanup_p.add_argument(
+        "--max-acu",
+        type=int,
+        default=None,
+        help="Optional ACU cap for the Devin session.",
+    )
     cleanup_p.set_defaults(func=cmd_cleanup)
 
     # ---- report (Part 4) ----

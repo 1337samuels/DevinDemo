@@ -460,7 +460,7 @@
             <button class="tab" data-phase="dashboard">Dashboard</button>
             <button class="tab active" data-phase="scan">Phase 1: Scan</button>
             <button class="tab" data-phase="validate">Phase 2: Validate</button>
-            <button class="tab stub" data-phase="cleanup">Phase 3: Cleanup</button>
+            <button class="tab" data-phase="cleanup">Phase 3: Cleanup</button>
             <button class="tab" data-phase="report">Phase 4: Report</button>
         </div>
 
@@ -618,11 +618,51 @@
             </div>
         </div>
 
-        <!-- Phase 3: Cleanup (stub) -->
+        <!-- Phase 3: Cleanup -->
         <div class="phase-panel" id="panel-cleanup">
-            <div class="stub-notice">
-                <h3>Not Yet Implemented</h3>
-                <p>Phase 3 (Cleanup PR generation) is not yet available.</p>
+            <div class="form-grid">
+                <div class="section-label">Devin API</div>
+                <div class="form-group">
+                    <label>API Key (v3) <span class="required">*</span></label>
+                    <input type="password" id="cleanup-api-key" placeholder="cog_..." />
+                </div>
+                <div class="form-group">
+                    <label>API Key (v1) <span class="required">*</span></label>
+                    <input type="password" id="cleanup-v1-api-key" placeholder="apk_..." />
+                </div>
+                <div class="form-group">
+                    <label>Organization ID <span class="required">*</span></label>
+                    <input type="text" id="cleanup-org-id" placeholder="org-..." />
+                </div>
+
+                <div class="section-label">Cleanup Configuration</div>
+                <div class="form-group">
+                    <label>Input File (Phase 2 Validate Results) <span class="required">*</span></label>
+                    <div class="file-selector">
+                        <select id="cleanup-input" data-file-type="validate" class="file-dropdown">
+                            <option value="">Loading...</option>
+                        </select>
+                        <div class="custom-path-row" id="cleanup-input-custom-row">
+                            <input type="text" id="cleanup-input-custom" placeholder="Enter custom file path..." />
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Output File</label>
+                    <input type="text" id="cleanup-output" placeholder="Auto-generated if empty" />
+                </div>
+                <div class="form-group">
+                    <label>Poll Interval (s)</label>
+                    <input type="number" id="cleanup-poll-interval" placeholder="15" />
+                </div>
+                <div class="form-group">
+                    <label>Poll Timeout (s)</label>
+                    <input type="number" id="cleanup-poll-timeout" placeholder="900" />
+                </div>
+                <div class="form-group">
+                    <label>Max ACU</label>
+                    <input type="number" id="cleanup-max-acu" placeholder="Optional" />
+                </div>
             </div>
 
             <!-- Cleanup console -->
@@ -1070,9 +1110,24 @@
                     layers: (checkedCount < totalLayers) ? selectedLayers : null,
                 };
             } else if (phase === 'cleanup') {
-                const apiKey = getVal('scan-api-key');
-                const orgId = getVal('scan-org-id');
-                args = { api_key: apiKey, org_id: orgId };
+                const apiKey = getVal('cleanup-api-key');
+                const v1ApiKey = getVal('cleanup-v1-api-key');
+                const orgId = getVal('cleanup-org-id');
+                const inputFile = getFilePath('cleanup-input');
+                if (!apiKey || !v1ApiKey || !orgId || !inputFile) {
+                    alert('API Key (v3), API Key (v1), Organization ID, and Input File are required.');
+                    return;
+                }
+                args = {
+                    api_key: apiKey,
+                    v1_api_key: v1ApiKey,
+                    org_id: orgId,
+                    input_file: inputFile,
+                    output: getVal('cleanup-output') || null,
+                    poll_interval: getNumVal('cleanup-poll-interval'),
+                    poll_timeout: getNumVal('cleanup-poll-timeout'),
+                    max_acu: getNumVal('cleanup-max-acu'),
+                };
             } else if (phase === 'report') {
                 const inputFile = getFilePath('report-input');
                 if (!inputFile) {
