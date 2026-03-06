@@ -1,4 +1,4 @@
-"""List all Devin sessions for your organization using the Devin API (v3)."""
+"""List Devin sessions and manage them (sleep/archive) using the Devin API (v3)."""
 
 import argparse
 import json
@@ -11,9 +11,9 @@ from urllib.request import Request, urlopen
 DEVIN_API_BASE_URL = "https://api.devin.ai"
 
 
-def _api_get(url: str, api_key: str) -> dict:
-    """Make an authenticated GET request and return parsed JSON."""
-    request = Request(url, method="GET")
+def _api_request(url: str, api_key: str, method: str = "GET") -> dict:
+    """Make an authenticated API request and return parsed JSON."""
+    request = Request(url, method=method)
     request.add_header("Authorization", f"Bearer {api_key}")
     request.add_header("Accept", "application/json")
 
@@ -55,7 +55,28 @@ def list_sessions(
         params["after"] = after
 
     url = f"{DEVIN_API_BASE_URL}/v3/organizations/{org_id}/sessions?{urlencode(params)}"
-    return _api_get(url, api_key)
+    return _api_request(url, api_key)
+
+
+def sleep_session(api_key: str, org_id: str, session_id: str) -> dict:
+    """Put a Devin session to sleep (archive it).
+
+    Uses the v3beta1 archive endpoint which suspends a running session
+    and preserves it for future reference.
+
+    Args:
+        api_key: Devin service user API key (starts with cog_).
+        org_id: Your Devin organization ID (starts with org-).
+        session_id: The session ID to put to sleep.
+
+    Returns:
+        Parsed JSON response with the updated session details.
+    """
+    url = (
+        f"{DEVIN_API_BASE_URL}/v3beta1/organizations/{org_id}"
+        f"/sessions/{session_id}/archive"
+    )
+    return _api_request(url, api_key, method="POST")
 
 
 def _format_timestamp(ts: int | str | None) -> str:
@@ -69,32 +90,38 @@ def _format_timestamp(ts: int | str | None) -> str:
     return str(ts)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="List all Devin sessions for your organization (v3 API)."
-    )
-    parser.add_argument(
-        "api_key",
-        help="Your Devin service user API key (starts with cog_).",
-    )
-    parser.add_argument(
-        "--org-id",
-        required=True,
-        help="Your Devin organization ID (starts with org-). Find it in Settings > General.",
-    )
-    parser.add_argument(
-        "--first",
-        type=int,
-        default=100,
-        help="Max number of sessions to return per page (default: 100, max: 200).",
-    )
-    parser.add_argument(
-        "--all-pages",
-        action="store_true",
-        help="Automatically fetch all pages of results.",
-    )
-    args = parser.parse_args()
+def _print_session(session: dict) -> None:
+    """Pretty-print a single session's details."""
+    session_id = session.get("session_id", "N/A")
+    title = session.get("title") or "(untitled)"
+    status = session.get("status", "unknown")
+    created = _format_timestamp(session.get("created_at"))
+    updated = _format_timestamp(session.get("updated_at"))
+    url = session.get("url", "")
 
+    pr_lines: list[str] = []
+    for pr in session.get("pull_requests", []):
+        pr_url = pr.get("pr_url", "")
+        pr_state = pr.get("pr_state", "")
+        if pr_url:
+            label = (
+                f"    PR: {pr_url} ({pr_state})" if pr_state else f"    PR: {pr_url}"
+            )
+            pr_lines.append(label)
+
+    print(f"  [{status}] {title}")
+    print(f"    ID:      {session_id}")
+    print(f"    Created: {created}")
+    print(f"    Updated: {updated}")
+    if url:
+        print(f"    URL:     {url}")
+    for pr_line in pr_lines:
+        print(pr_line)
+    print()
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    """List all sessions."""
     all_sessions: list[dict] = []
     after: str | None = None
     page = 0
@@ -121,30 +148,67 @@ def main() -> None:
     print(f"Fetched {len(all_sessions)} session(s) ({page} page(s)):\n")
 
     for session in all_sessions:
-        session_id = session.get("session_id", "N/A")
-        title = session.get("title") or "(untitled)"
-        status = session.get("status", "unknown")
-        created = _format_timestamp(session.get("created_at"))
-        updated = _format_timestamp(session.get("updated_at"))
-        url = session.get("url", "")
+        _print_session(session)
 
-        pr_lines: list[str] = []
-        for pr in session.get("pull_requests", []):
-            pr_url = pr.get("pr_url", "")
-            pr_state = pr.get("pr_state", "")
-            if pr_url:
-                label = f"    PR: {pr_url} ({pr_state})" if pr_state else f"    PR: {pr_url}"
-                pr_lines.append(label)
 
-        print(f"  [{status}] {title}")
-        print(f"    ID:      {session_id}")
-        print(f"    Created: {created}")
-        print(f"    Updated: {updated}")
-        if url:
-            print(f"    URL:     {url}")
-        for pr_line in pr_lines:
-            print(pr_line)
-        print()
+def cmd_sleep(args: argparse.Namespace) -> None:
+    """Put a session to sleep."""
+    print(f"Putting session {args.session_id} to sleep ...")
+    result = sleep_session(args.api_key, args.org_id, args.session_id)
+    print("Session archived/sleeping.\n")
+    _print_session(result)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="List and manage Devin sessions (v3 API).",
+    )
+    parser.add_argument(
+        "api_key",
+        help="Your Devin service user API key (starts with cog_).",
+    )
+    parser.add_argument(
+        "--org-id",
+        required=True,
+        help="Your Devin organization ID (starts with org-). Find it in Settings > General.",
+    )
+
+    subparsers = parser.add_subparsers(dest="action", required=False)
+
+    # ---- list (default) ----
+    list_p = subparsers.add_parser("list", help="List all sessions.")
+    list_p.add_argument(
+        "--first",
+        type=int,
+        default=100,
+        help="Max number of sessions to return per page (default: 100, max: 200).",
+    )
+    list_p.add_argument(
+        "--all-pages",
+        action="store_true",
+        help="Automatically fetch all pages of results.",
+    )
+    list_p.set_defaults(func=cmd_list)
+
+    # ---- sleep ----
+    sleep_p = subparsers.add_parser(
+        "sleep", help="Put a session to sleep (archive it)."
+    )
+    sleep_p.add_argument(
+        "session_id",
+        help="The session ID to put to sleep.",
+    )
+    sleep_p.set_defaults(func=cmd_sleep)
+
+    args = parser.parse_args()
+
+    # Default to 'list' when no subcommand given
+    if args.action is None:
+        args.first = 100
+        args.all_pages = False
+        cmd_list(args)
+    else:
+        args.func(args)
 
 
 if __name__ == "__main__":
