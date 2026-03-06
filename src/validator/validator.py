@@ -1,7 +1,18 @@
 """Part 2 --- Validate that identified items are truly legacy / dead code.
 
-For each candidate (or small batch of related candidates) from Part 1,
-this module spins up a Devin session that runs **8 validation layers**:
+Uses a **single Devin session** with sequential prompts via ``send_message()``:
+
+1. **Setup** --- create a session with a neutral prompt and wait for it to
+   become ready.
+2. **Batch validation prompts** --- ``send_message()`` for each batch of
+   related candidates, running 8 validation layers per candidate.
+
+The session is sent to sleep after all batches complete.
+
+``send_message()`` uses the **v1** API endpoint which works with ``cog_``
+service-user keys without requiring ``ManageOrgSessions``.
+
+The 8 validation layers are:
 
 1. Re-Confirm the Detection
 2. Git History Staleness
@@ -12,12 +23,15 @@ this module spins up a Devin session that runs **8 validation layers**:
 7. Runtime & Deployment Signals (best-effort)
 8. Cross-Repository & External Consumers
 
-Each session returns structured results per layer plus an overall
+Each batch returns structured results per layer plus an overall
 confidence level (``EXEMPT``, ``HIGH``, ``MEDIUM``, ``LOW``).
 """
 
 from __future__ import annotations
 
+import json
+import re
+import time
 from collections import defaultdict
 from typing import Any, Callable
 
@@ -823,6 +837,49 @@ DEFAULT_CONFIG: dict[str, int] = {
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    """Format elapsed seconds as ``Xm YYs`` or ``Ys``."""
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m{s:02d}s" if m else f"{s}s"
+
+
+def _extract_json_block(text: str) -> dict[str, Any] | None:
+    """Extract the first JSON code-fence block from *text*.
+
+    Returns the parsed dict, or ``None`` if no valid JSON block is found.
+    """
+    # Try ```json ... ``` first
+    pattern = r"```(?:json)?\s*\n(\{.*?\})\s*\n```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: try to find a raw JSON object
+    brace_start = text.find("{")
+    if brace_start != -1:
+        depth = 0
+        for i in range(brace_start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[brace_start : i + 1])
+                    except json.JSONDecodeError:
+                        pass
+                    break
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Batching helpers
 # ---------------------------------------------------------------------------
 
@@ -1063,15 +1120,27 @@ def _generate_recommendations(
 
 
 class LegacyCodeValidator:
-    """Validate scanner findings via Devin sessions.
+    """Validate scanner findings via a single Devin session.
 
-    For each batch of related candidates the validator:
-    1. Constructs a detailed prompt from the template.
-    2. Creates a Devin session with structured-output schema.
-    3. Polls until the session finishes.
-    4. Extracts per-candidate validation verdicts.
-    5. Merges results back into the Part 1 data structure.
+    Uses the same single-session pattern as Phase 1:
+
+    1. **Setup** --- create session with neutral prompt, wait until ready.
+    2. **Batch prompts** --- ``send_message()`` for each batch of
+       related candidates.
+    3. **Parse results** --- extract JSON from Devin's text responses
+       via the v1 API (which includes the full conversation history).
+    4. **Sleep** --- send the session to sleep when all batches are done.
+
+    ``send_message()`` uses the v1 API which works with ``cog_`` keys.
     """
+
+    # The follow-up message sent to unblock a waiting session.
+    _NUDGE_MESSAGE = (
+        "Please continue with the validation analysis and produce your "
+        "results as a JSON block. If you need any clarification, proceed "
+        "with best-effort analysis using the information already available "
+        "in the repository."
+    )
 
     def __init__(
         self,
@@ -1083,24 +1152,8 @@ class LegacyCodeValidator:
         self._config = {**DEFAULT_CONFIG, **(config or {})}
 
     # ------------------------------------------------------------------
-    # Public API
+    # Public entry point
     # ------------------------------------------------------------------
-
-    # Maximum number of nudge messages to send per session when it's
-    # stuck in ``waiting_for_user`` without structured output.
-    _MAX_NUDGE_ATTEMPTS = 3
-
-    # How long (seconds) to wait for the user to respond in the Devin UI
-    # after a 403 prevents sending a nudge programmatically.
-    _MANUAL_RESPONSE_TIMEOUT = 300
-
-    # The follow-up message sent to unblock a waiting session.
-    _NUDGE_MESSAGE = (
-        "Please continue with the validation analysis and populate the "
-        "structured output with your findings for all candidates. If you "
-        "need any clarification, proceed with best-effort analysis using "
-        "the information already available in the repository."
-    )
 
     def validate(
         self,
@@ -1114,15 +1167,18 @@ class LegacyCodeValidator:
     ) -> dict[str, Any]:
         """Validate a set of Part 1 findings.
 
+        Creates a **single** Devin session, then sends each batch of
+        candidates as a follow-up message via ``send_message()``.
+
         Args:
             findings: The enriched structured output from the scanner.
             poll_interval: Seconds between status polls.
-            poll_timeout: Max seconds to wait per session.
-            max_acu_limit: Optional ACU cap per Devin session.
+            poll_timeout: Max seconds to wait per prompt round.
+            max_acu_limit: Optional ACU cap for the session.
             progress_tracker_factory: Optional callable
                 ``(batch_idx, total_batches, batch_size) -> callback``
                 that returns a per-batch progress callback.
-            max_batch_size: Maximum candidates per DevinAPI session.
+            max_batch_size: Maximum candidates per batch prompt.
 
         Returns:
             The original *findings* dict, enriched with validation data and
@@ -1138,12 +1194,52 @@ class LegacyCodeValidator:
             findings["validation_report"] = build_summary_report({}, [])
             return findings
 
+        total_candidates = sum(len(b[1]) for b in batches)
         print(
             f"[validator] {total_batches} batch(es) to validate across "
-            f"{sum(len(b[1]) for b in batches)} candidate(s)."
+            f"{total_candidates} candidate(s)."
         )
 
-        # Collect all per-candidate results keyed by finding ID.
+        # ---- Create session with neutral setup prompt ----
+        setup_prompt = (
+            f"You are a dead-code validation assistant for the repository "
+            f"**{repo}**.  Wait for my instructions before doing anything."
+        )
+
+        print(f"[validator] Creating session for {repo} ...")
+        session = self._client.create_session(
+            prompt=setup_prompt,
+            repos=[repo] if repo else None,
+            tags=["dead-code-validation", "automated"],
+            title=f"Dead-code validation: {repo}",
+            max_acu_limit=max_acu_limit,
+        )
+        session_id = session["session_id"]
+        session_url = session.get("url", "")
+        print(f"[validator] Session: {session_id}")
+        print(f"[validator] URL: {session_url}")
+
+        # Wait for session to be ready
+        print("[validator] Waiting for session to initialise ...")
+        phase0_start = time.monotonic()
+
+        def _setup_status(sess: dict[str, Any]) -> None:
+            elapsed = time.monotonic() - phase0_start
+            status = sess.get("status", "")
+            detail = sess.get("status_detail", "")
+            print(
+                f"  [{_fmt_elapsed(elapsed)}] {status}"
+                f" ({detail})  | Initialising session ..."
+            )
+
+        self._client.poll_session(
+            session_id,
+            interval=poll_interval,
+            timeout=poll_timeout,
+            on_update=_setup_status,
+        )
+
+        # ---- Send batch validation prompts ----
         validation_map: dict[str, dict[str, Any]] = {}
         all_patterns: list[str] = []
 
@@ -1152,29 +1248,15 @@ class LegacyCodeValidator:
         ):
             ids = [c.get("id", "?") for c in batch_candidates]
             print(
-                f"\n[validator] Batch {batch_idx}/{total_batches}: "
+                f"\n[validator] --- Batch {batch_idx}/{total_batches}: "
                 f"{category_label} ({len(batch_candidates)} candidate(s): "
-                f"{', '.join(ids)})"
+                f"{', '.join(ids)}) ---"
             )
 
             prompt = self._build_prompt(category_label, batch_candidates)
-            title = (
-                f"Validate dead-code batch {batch_idx}/{total_batches}: "
-                f"{category_label}"
-            )
 
-            session = self._client.create_session(
-                prompt=prompt,
-                repos=[repo] if repo else None,
-                structured_output_schema=VALIDATION_OUTPUT_SCHEMA,
-                tags=["dead-code-validation", "automated"],
-                title=title,
-                max_acu_limit=max_acu_limit,
-            )
-            session_id = session["session_id"]
-            session_url = session.get("url", "")
-            print(f"[validator]   Session: {session_id}")
-            print(f"[validator]   URL: {session_url}")
+            # Send batch prompt as a follow-up message
+            self._client.send_message(session_id, prompt)
 
             # Build per-batch progress tracker if factory provided.
             tracker = (
@@ -1185,103 +1267,79 @@ class LegacyCodeValidator:
                 else None
             )
 
-            # Build waiting_for_user handler that nudges the session.
-            nudge_count = 0
-            manual_prompt_shown = False
+            # Wait for Devin to finish processing this batch
+            batch_start = time.monotonic()
 
-            def _handle_waiting_for_user(
-                client: DevinAPIClient, sess: dict[str, Any]
-            ) -> bool:
-                nonlocal nudge_count, manual_prompt_shown
-                if nudge_count >= self._MAX_NUDGE_ATTEMPTS:
-                    print(
-                        f"[validator]   Session {session_id} still "
-                        f"waiting_for_user after {nudge_count} nudge(s); "
-                        "giving up."
-                    )
-                    return False  # stop polling
-                nudge_count += 1
+            def _batch_status(
+                sess: dict[str, Any],
+                _bidx: int = batch_idx,
+                _btot: int = total_batches,
+                _ncand: int = len(batch_candidates),
+                _bstart: float = batch_start,
+            ) -> None:
+                elapsed = time.monotonic() - _bstart
+                status = sess.get("status", "")
+                detail = sess.get("status_detail", "")
                 print(
-                    f"[validator]   Session {session_id} is "
-                    f"waiting_for_user (nudge {nudge_count}/"
-                    f"{self._MAX_NUDGE_ATTEMPTS}) \u2014 sending "
-                    "follow-up message."
+                    f"  [{_fmt_elapsed(elapsed)}] {status}"
+                    f" ({detail})"
+                    f"  | Batch {_bidx}/{_btot}"
+                    f"  | Candidates: {_ncand}"
                 )
-                try:
-                    client.send_message(session_id, self._NUDGE_MESSAGE)
-                except Exception as exc:  # noqa: BLE001
-                    exc_str = str(exc)
-                    if "403" in exc_str and not manual_prompt_shown:
-                        manual_prompt_shown = True
-                        s_url = session_url or (
-                            f"https://app.devin.ai/sessions/{session_id}"
-                        )
-                        print(
-                            f"\n{'=' * 60}\n"
-                            f"ACTION REQUIRED\n"
-                            f"{'=' * 60}\n"
-                            f"Session {session_id} is waiting for user "
-                            f"input, but your API key does not have "
-                            f"permission to send messages "
-                            f"programmatically (HTTP 403).\n\n"
-                            f"Please open the session in your browser "
-                            f"and respond to unblock it:\n"
-                            f"  {s_url}\n\n"
-                            f"Suggested response:\n"
-                            f"  \"{self._NUDGE_MESSAGE}\"\n\n"
-                            f"Waiting up to "
-                            f"{self._MANUAL_RESPONSE_TIMEOUT}s for the "
-                            f"session to resume\u2026\n"
-                            f"{'=' * 60}"
-                        )
-                    elif "403" not in exc_str:
-                        print(
-                            f"[validator]   WARNING: failed to send "
-                            f"nudge: {exc}"
-                        )
-                return True  # keep polling
 
-            final = self._client.poll_session(
+            # Use the factory tracker if available, else the simple one
+            on_update_cb = tracker if tracker is not None else _batch_status
+
+            self._client.poll_session(
                 session_id,
                 interval=poll_interval,
                 timeout=poll_timeout,
-                on_update=tracker,
-                on_waiting_for_user=_handle_waiting_for_user,
+                on_update=on_update_cb,
+                expect_running_first=True,
             )
 
-            structured = final.get("structured_output")
-            if structured is None:
+            # Fetch conversation via V1 to get Devin's latest text response
+            v1_session = self._client.get_session_v1(session_id)
+            batch_result = self._parse_batch_response(v1_session)
+
+            if batch_result is None:
                 print(
-                    f"[validator]   WARNING: session {session_id} produced no "
-                    "structured output; marking batch candidates as unverified."
+                    f"[validator]   WARNING: no parseable output for batch "
+                    f"{batch_idx}; marking candidates as unverified."
                 )
                 for cand in batch_candidates:
                     validation_map[cand["id"]] = {
                         "candidate_id": cand["id"],
                         "confidence": CONFIDENCE_LOW,
                         "summary": (
-                            "Validation session did not produce output."
+                            "Validation session did not produce output "
+                            "for this batch."
                         ),
                         "blockers": [
-                            "Validation session ended without structured "
-                            "output."
+                            "Could not extract validation results from "
+                            "session response."
                         ],
                         "layer_results": {},
                     }
                 continue
 
-            # Parse session results
-            for vresult in structured.get("candidates", []):
+            # Parse per-candidate results
+            for vresult in batch_result.get("candidates", []):
                 cid = vresult.get("candidate_id", "")
-                validation_map[cid] = vresult
+                if cid:
+                    validation_map[cid] = vresult
 
-            all_patterns.extend(structured.get("patterns_observed", []))
+            all_patterns.extend(batch_result.get("patterns_observed", []))
 
+            n_parsed = len(batch_result.get("candidates", []))
             print(
                 f"[validator]   Batch {batch_idx} complete. "
-                f"Results for "
-                f"{len(structured.get('candidates', []))} candidate(s)."
+                f"Results for {n_parsed} candidate(s)."
             )
+
+        # ---- Send session to sleep ----
+        print("[validator] Sending session to sleep ...")
+        self._client.send_message(session_id, "sleep")
 
         # Merge results back into findings
         _merge_validation_into_findings(findings, validation_map)
@@ -1294,6 +1352,48 @@ class LegacyCodeValidator:
         self._print_summary(report)
 
         return findings
+
+    # ------------------------------------------------------------------
+    # Response parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _last_devin_message(session: dict[str, Any]) -> str:
+        """Return the text of the most recent ``devin_message`` in the
+        V1 session response's ``messages`` list.
+        """
+        messages = session.get("messages") or []
+        for msg in reversed(messages):
+            if msg.get("type") == "devin_message":
+                return msg.get("message", "")
+        return ""
+
+    def _parse_batch_response(
+        self, session: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Extract batch validation results from the session response.
+
+        Uses the V1 session response which includes the full
+        ``messages`` list.  Tries structured_output first, then
+        parses JSON from Devin's last message.
+
+        Returns the parsed dict with a ``candidates`` key, or ``None``
+        if nothing could be extracted.
+        """
+        # Try structured output first
+        structured = session.get("structured_output")
+        if structured is not None:
+            if structured.get("candidates") is not None:
+                return structured
+
+        # Fallback: parse JSON from Devin's last message
+        last_text = self._last_devin_message(session)
+        if last_text:
+            parsed = _extract_json_block(last_text)
+            if parsed and "candidates" in parsed:
+                return parsed
+
+        return None
 
     # ------------------------------------------------------------------
     # Internal helpers
