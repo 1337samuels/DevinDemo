@@ -1,4 +1,7 @@
-"""Devin API v3 client wrapper for creating and polling sessions."""
+"""Devin API client wrapper for creating and polling sessions.
+
+Uses v3 for session creation/polling and v1 for ``send_message()``.
+"""
 
 from __future__ import annotations
 
@@ -23,15 +26,25 @@ class DevinAPIError(Exception):
 
 
 class DevinAPIClient:
-    """Thin wrapper around the Devin v3 REST API.
+    """Thin wrapper around the Devin REST API.
+
+    Uses the **v3** API for session creation, polling, and listing,
+    and the **v1** API for ``send_message()`` (which requires a
+    separate legacy API key).
 
     Args:
-        api_key: Service user API key (starts with ``cog_``).
+        api_key: Service user API key (starts with ``cog_``) for v3.
         org_id: Organization ID (starts with ``org-``).
+        v1_api_key: Legacy API key (starts with ``apk_``) for v1
+            endpoints like ``send_message()``.  Required when using
+            the single-session multi-prompt flow.
     """
 
-    def __init__(self, api_key: str, org_id: str) -> None:
+    def __init__(
+        self, api_key: str, org_id: str, *, v1_api_key: str | None = None
+    ) -> None:
         self._api_key = api_key
+        self._v1_api_key = v1_api_key
         self._org_id = org_id
         self._session = requests.Session()
         self._session.headers.update(
@@ -71,8 +84,14 @@ class DevinAPIClient:
         """
         last_exc: DevinAPIError | None = None
         url = self._url(path, api_version=_api_version)
+
+        # V1 endpoints need the legacy API key.
+        headers: dict[str, str] | None = None
+        if _api_version == "v1" and self._v1_api_key:
+            headers = {"Authorization": f"Bearer {self._v1_api_key}"}
+
         for attempt in range(_retries + 1):
-            resp = self._session.request(method, url, **kwargs)
+            resp = self._session.request(method, url, headers=headers, **kwargs)
             if resp.ok:
                 return resp.json()
 
