@@ -206,15 +206,11 @@ class DevinAPIClient:
             if status == "running" and status_detail == "finished":
                 return session
 
-            # If the session is waiting for user input but already has
-            # structured output, treat it as effectively complete.  The
-            # session won't progress without a human message, and we
-            # already have the scan results we need.
-            if (
-                status == "running"
-                and status_detail == "waiting_for_user"
-                and session.get("structured_output") is not None
-            ):
+            # The session is waiting for a follow-up message.  In the
+            # single-session multi-prompt flow, this means Devin finished
+            # processing the current prompt and is ready for the next one.
+            # Always return here so the caller can send the next message.
+            if status == "running" and status_detail == "waiting_for_user":
                 return session
 
             if time.monotonic() >= deadline:

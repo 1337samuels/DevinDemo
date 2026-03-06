@@ -303,6 +303,12 @@ def _enrich_results(
 # ---------------------------------------------------------------------------
 
 
+def _fmt_elapsed(seconds: float) -> str:
+    """Format elapsed seconds as ``Xm YYs`` or ``Ys``."""
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m{s:02d}s" if m else f"{s}s"
+
+
 def _chunk_list(items: list[str], size: int) -> list[list[str]]:
     """Split *items* into sub-lists of at most *size* elements."""
     return [items[i : i + size] for i in range(0, len(items), size)]
@@ -420,8 +426,22 @@ class FeatureFlagScanner:
 
         # ---- Phase 1: Wait for discovery response ----
         print("[scanner] Phase 1: discovering .py files ...")
+        phase1_start = time.monotonic()
+
+        def _discovery_status(sess: dict[str, Any]) -> None:
+            elapsed = time.monotonic() - phase1_start
+            status = sess.get("status", "")
+            detail = sess.get("status_detail", "")
+            print(
+                f"  [{_fmt_elapsed(elapsed)}] {status}"
+                f" ({detail})  | Phase 1: listing files ..."
+            )
+
         final = self._client.poll_session(
-            session_id, interval=poll_interval, timeout=poll_timeout
+            session_id,
+            interval=poll_interval,
+            timeout=poll_timeout,
+            on_update=_discovery_status,
         )
 
         file_list = self._parse_discovery_response(final)
@@ -480,8 +500,32 @@ class FeatureFlagScanner:
             self._client.send_message(session_id, batch_prompt)
 
             # Wait for Devin to finish processing this batch
+            batch_start = time.monotonic()
+
+            def _batch_status(
+                sess: dict[str, Any],
+                _bidx: int = batch_idx,
+                _btot: int = total_batches,
+                _fdone: int = files_done,
+                _ftot: int = total_files,
+                _bstart: float = batch_start,
+            ) -> None:
+                elapsed = time.monotonic() - _bstart
+                status = sess.get("status", "")
+                detail = sess.get("status_detail", "")
+                pct = min(100, int(_fdone / _ftot * 100)) if _ftot > 0 else 0
+                print(
+                    f"  [{_fmt_elapsed(elapsed)}] {status}"
+                    f" ({detail})"
+                    f"  | Batch {_bidx}/{_btot}"
+                    f"  | Files: {_fdone}/{_ftot} ({pct}%)"
+                )
+
             batch_final = self._client.poll_session(
-                session_id, interval=poll_interval, timeout=poll_timeout
+                session_id,
+                interval=poll_interval,
+                timeout=poll_timeout,
+                on_update=_batch_status,
             )
 
             # Try to extract batch results from structured output
@@ -559,8 +603,8 @@ class FeatureFlagScanner:
     def _parse_batch_response(self, session: dict[str, Any]) -> dict[str, Any]:
         """Extract batch scan results from the session response.
 
-        Tries structured_output first (which accumulates across the
-        session), then falls back to parsing JSON from messages.
+        Tries structured_output first, then falls back to parsing JSON
+        from the last message text.
         """
         structured = session.get("structured_output")
         if structured is not None:
@@ -568,8 +612,13 @@ class FeatureFlagScanner:
             if structured.get("feature_flags") is not None:
                 return structured
 
-        # Fallback: empty result (Devin may update structured_output
-        # only at the very end of the session)
+        # Fallback: parse JSON from the last message text
+        last_text = session.get("last_message", "") or ""
+        parsed = _extract_json_block(last_text)
+        if parsed and "feature_flags" in parsed:
+            return parsed
+
+        # Last resort: empty result
         return {
             "feature_flags": [],
             "dead_code": [],
