@@ -174,6 +174,7 @@ class DevinAPIClient:
         interval: int = 15,
         timeout: int = 600,
         on_update: Any | None = None,
+        on_waiting_for_user: Any | None = None,
     ) -> dict[str, Any]:
         """Poll a session until it reaches a terminal status.
 
@@ -183,6 +184,15 @@ class DevinAPIClient:
             timeout: Maximum total seconds to wait (default 600).
             on_update: Optional callback ``(session_dict) -> None``
                        called after each poll.
+            on_waiting_for_user: Optional callback
+                ``(client, session_dict) -> bool`` called when the session
+                enters ``waiting_for_user`` **without** structured output.
+                The callback can send a follow-up message via
+                ``client.send_message()`` and should return ``True`` to
+                keep polling or ``False`` to return immediately.
+                If not provided, waiting-for-user with structured output
+                returns the session; without structured output it keeps
+                polling until timeout.
 
         Returns:
             The final session dict once a terminal status is reached.
@@ -206,16 +216,18 @@ class DevinAPIClient:
             if status == "running" and status_detail == "finished":
                 return session
 
-            # If the session is waiting for user input but already has
-            # structured output, treat it as effectively complete.  The
-            # session won't progress without a human message, and we
-            # already have the scan results we need.
-            if (
-                status == "running"
-                and status_detail == "waiting_for_user"
-                and session.get("structured_output") is not None
-            ):
-                return session
+            # Handle waiting_for_user
+            if status == "running" and status_detail == "waiting_for_user":
+                # If structured output exists, we have what we need.
+                if session.get("structured_output") is not None:
+                    return session
+
+                # If a callback was provided, let it decide what to do.
+                if on_waiting_for_user is not None:
+                    keep_polling = on_waiting_for_user(self, session)
+                    if not keep_polling:
+                        return session
+                # Otherwise keep polling (original behaviour).
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(

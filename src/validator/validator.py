@@ -1086,6 +1086,18 @@ class LegacyCodeValidator:
     # Public API
     # ------------------------------------------------------------------
 
+    # Maximum number of nudge messages to send per session when it's
+    # stuck in ``waiting_for_user`` without structured output.
+    _MAX_NUDGE_ATTEMPTS = 3
+
+    # The follow-up message sent to unblock a waiting session.
+    _NUDGE_MESSAGE = (
+        "Please continue with the validation analysis and populate the "
+        "structured output with your findings for all candidates. If you "
+        "need any clarification, proceed with best-effort analysis using "
+        "the information already available in the repository."
+    )
+
     def validate(
         self,
         findings: dict[str, Any],
@@ -1093,7 +1105,7 @@ class LegacyCodeValidator:
         poll_interval: int = 15,
         poll_timeout: int = 900,
         max_acu_limit: int | None = None,
-        on_status_update: Callable[[dict[str, Any]], None] | None = None,
+        progress_tracker_factory: Callable[..., Callable[[dict[str, Any]], None]] | None = None,
         max_batch_size: int = 5,
     ) -> dict[str, Any]:
         """Validate a set of Part 1 findings.
@@ -1103,7 +1115,9 @@ class LegacyCodeValidator:
             poll_interval: Seconds between status polls.
             poll_timeout: Max seconds to wait per session.
             max_acu_limit: Optional ACU cap per Devin session.
-            on_status_update: Optional callback ``(session_dict) -> None``.
+            progress_tracker_factory: Optional callable
+                ``(batch_idx, total_batches, batch_size) -> callback``
+                that returns a per-batch progress callback.
             max_batch_size: Maximum candidates per DevinAPI session.
 
         Returns:
@@ -1158,11 +1172,50 @@ class LegacyCodeValidator:
             print(f"[validator]   Session: {session_id}")
             print(f"[validator]   URL: {session_url}")
 
+            # Build per-batch progress tracker if factory provided.
+            tracker = (
+                progress_tracker_factory(
+                    batch_idx, total_batches, len(batch_candidates)
+                )
+                if progress_tracker_factory is not None
+                else None
+            )
+
+            # Build waiting_for_user handler that nudges the session.
+            nudge_count = 0
+
+            def _handle_waiting_for_user(
+                client: DevinAPIClient, sess: dict[str, Any]
+            ) -> bool:
+                nonlocal nudge_count
+                if nudge_count >= self._MAX_NUDGE_ATTEMPTS:
+                    print(
+                        f"[validator]   Session {session_id} still "
+                        f"waiting_for_user after {nudge_count} nudge(s); "
+                        "giving up."
+                    )
+                    return False  # stop polling
+                nudge_count += 1
+                print(
+                    f"[validator]   Session {session_id} is "
+                    f"waiting_for_user (nudge {nudge_count}/"
+                    f"{self._MAX_NUDGE_ATTEMPTS}) \u2014 sending "
+                    "follow-up message."
+                )
+                try:
+                    client.send_message(session_id, self._NUDGE_MESSAGE)
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"[validator]   WARNING: failed to send nudge: {exc}"
+                    )
+                return True  # keep polling
+
             final = self._client.poll_session(
                 session_id,
                 interval=poll_interval,
                 timeout=poll_timeout,
-                on_update=on_status_update,
+                on_update=tracker,
+                on_waiting_for_user=_handle_waiting_for_user,
             )
 
             structured = final.get("structured_output")

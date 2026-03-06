@@ -115,6 +115,87 @@ class ProgressTracker:
         )
 
 
+class ValidationProgressTracker:
+    """Stateful callback for validation session polling.
+
+    Displays:
+    - Elapsed time and session status
+    - Candidates validated so far (from partial structured output)
+    - Confidence breakdown (HIGH/MEDIUM/LOW/EXEMPT)
+    - ETA based on candidate completion rate
+    """
+
+    def __init__(self, batch_idx: int, total_batches: int, batch_size: int) -> None:
+        self._start = time.monotonic()
+        self._poll_count = 0
+        self._batch_idx = batch_idx
+        self._total_batches = total_batches
+        self._batch_size = batch_size
+        self._first_candidate_time: float | None = None
+        self._prev_candidates = 0
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s" if m else f"{s}s"
+
+    def __call__(self, session: dict) -> None:
+        self._poll_count += 1
+        elapsed = time.monotonic() - self._start
+
+        status = session.get("status", "?")
+        detail = session.get("status_detail", "")
+        status_str = f"{status} ({detail})" if detail else status
+
+        output = session.get("structured_output")
+        batch_label = f"Batch {self._batch_idx}/{self._total_batches}"
+
+        if output is None:
+            print(
+                f"  [{self._fmt_elapsed(elapsed)}] {batch_label} | {status_str}"
+                f"  | Waiting for validation to start \u2026"
+            )
+            return
+
+        candidates_done = len(output.get("candidates", []))
+
+        # Record when first candidate finishes
+        if candidates_done > 0 and self._first_candidate_time is None:
+            self._first_candidate_time = time.monotonic()
+
+        # Confidence breakdown
+        counts: dict[str, int] = {}
+        for c in output.get("candidates", []):
+            lvl = c.get("confidence", "?")
+            counts[lvl] = counts.get(lvl, 0) + 1
+        parts = [f"{k}:{v}" for k, v in sorted(counts.items()) if v > 0]
+        conf_str = ", ".join(parts) if parts else "pending"
+
+        # Progress
+        progress_str = f"{candidates_done}/{self._batch_size}"
+
+        # ETA
+        eta_str = "calculating \u2026"
+        if candidates_done > 0 and self._first_candidate_time is not None:
+            scan_elapsed = time.monotonic() - self._first_candidate_time
+            if scan_elapsed > 0:
+                rate = candidates_done / scan_elapsed
+                remaining = self._batch_size - candidates_done
+                if remaining <= 0:
+                    eta_str = "finishing up"
+                else:
+                    eta_str = f"~{self._fmt_elapsed(remaining / rate)}"
+
+        self._prev_candidates = candidates_done
+
+        print(
+            f"  [{self._fmt_elapsed(elapsed)}] {batch_label} | {status_str}"
+            f"  | Candidates: {progress_str}"
+            f"  | Confidence: {conf_str}"
+            f"  | ETA: {eta_str}"
+        )
+
+
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run the identification scan (Part 1)."""
     client = DevinAPIClient(api_key=args.api_key, org_id=args.org_id)
@@ -195,7 +276,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
             max_acu_limit=args.max_acu,
-            on_status_update=_status_callback,
+            progress_tracker_factory=ValidationProgressTracker,
             max_batch_size=args.max_batch_size,
         )
     except DevinAPIError as exc:
