@@ -13,7 +13,13 @@ import threading
 from flask import Flask, jsonify, render_template
 from flask_socketio import SocketIO, emit
 
-from src.validator.validator import ALL_LAYER_NUMBERS, LAYER_LABELS
+# Ensure the project root is on sys.path so ``from src.…`` works even when
+# this file is executed directly (e.g. ``python web/app.py``).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from src.validator.validator import ALL_LAYER_NUMBERS, LAYER_LABELS  # noqa: E402
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "devindemo-gui"
@@ -23,8 +29,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 _current_process: subprocess.Popen | None = None
 _process_lock = threading.Lock()
 
-# Path to the project root (one level up from web/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = _PROJECT_ROOT
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
 # Regex to parse default output filenames: <prefix>_YYYYMMDD_HHMMSS.json
