@@ -298,7 +298,11 @@ def cmd_report(args: argparse.Namespace) -> None:
 # secrets.txt loader
 # ---------------------------------------------------------------------------
 
+# Resolve secrets.txt relative to this script's directory (i.e. the repo root)
+# so it works regardless of the caller's current working directory.
+_REPO_DIR = Path(__file__).resolve().parent
 _SECRETS_FILE = "secrets.txt"
+_SECRETS_PATH = _REPO_DIR / _SECRETS_FILE
 
 # Maps secrets.txt key -> (argparse dest, applicable commands)
 _SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
@@ -310,18 +314,20 @@ _SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
 }
 
 
-def _load_secrets(path: str = _SECRETS_FILE) -> dict[str, str]:
+def _load_secrets(path: Path = _SECRETS_PATH) -> dict[str, str]:
     """Parse a ``secrets.txt`` file and return a ``{KEY: value}`` dict.
 
     Each line is expected to be ``KEY = "value"`` (or ``KEY = value``).
     Blank lines and lines without ``=`` are silently skipped.
+
+    By default the file is looked up next to ``main.py`` (the repo root),
+    **not** relative to the caller's working directory.
     """
     secrets: dict[str, str] = {}
-    p = Path(path)
-    if not p.is_file():
+    if not path.is_file():
         return secrets
 
-    for line in p.read_text().splitlines():
+    for line in path.read_text().splitlines():
         line = line.strip()
         if not line or "=" not in line:
             continue
