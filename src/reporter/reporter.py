@@ -1,7 +1,7 @@
 """Part 4 --- Report findings and cleanup results.
 
-Orchestrates publishing validated findings to Notion and sending Slack
-notifications when cleanup PRs are opened.
+Orchestrates publishing validated findings to Notion and sending a Slack
+summary message with a link to the Notion report and all opened PRs.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.reporter.notion_reporter import NotionReporter, _extract_candidates
-from src.reporter.slack_notifier import SlackNotifier
+from src.reporter.slack_notifier import SlackNotifier, SlackNotifyError
 
 
 class DebtReporter:
@@ -61,7 +61,7 @@ class DebtReporter:
             "targets": targets,
             "candidates_processed": 0,
             "notion_database_id": None,
-            "slack_notifications_sent": 0,
+            "slack_summary_sent": False,
         }
 
         # Extract candidates once (used by both Notion and Slack)
@@ -79,10 +79,14 @@ class DebtReporter:
             )
 
         # --- Slack ---
-        if "slack" in targets and cleanup_results:
-            result["slack_notifications_sent"] = self._notify_slack(
-                candidates, cleanup_results
+        if "slack" in targets:
+            self._notify_slack(
+                notion_database_id=result["notion_database_id"],
+                cleanup_results=cleanup_results,
+                candidates_processed=len(candidates),
+                repo=findings.get("repo"),
             )
+            result["slack_summary_sent"] = True
 
         # --- stdout ---
         if "stdout" in targets:
@@ -121,16 +125,26 @@ class DebtReporter:
 
     def _notify_slack(
         self,
-        candidates: list[dict[str, Any]],
-        cleanup_results: list[dict[str, Any]],
-    ) -> int:
-        """Send Slack notifications for PRs that were opened."""
+        notion_database_id: str | None,
+        cleanup_results: list[dict[str, Any]] | None,
+        candidates_processed: int,
+        repo: str | None = None,
+    ) -> None:
+        """Send a single Slack summary with Notion link and PR URLs."""
         if not self._slack_webhook_url:
             print("[reporter] Slack webhook not configured; skipping.")
-            return 0
+            return
 
         notifier = SlackNotifier(self._slack_webhook_url)
-        return notifier.notify_batch(candidates, cleanup_results)
+        try:
+            notifier.notify_report_complete(
+                notion_database_id=notion_database_id,
+                cleanup_results=cleanup_results,
+                candidates_processed=candidates_processed,
+                repo=repo,
+            )
+        except SlackNotifyError as exc:
+            print(f"[reporter] WARNING: Slack notification failed: {exc}")
 
     @staticmethod
     def _print_stdout(

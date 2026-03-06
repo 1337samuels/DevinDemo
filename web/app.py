@@ -119,6 +119,7 @@ def api_secrets():
         "ORG_ID": ["scan-org-id", "validate-org-id", "cleanup-org-id"],
         "NOTION_SECRET": ["report-notion-api-key"],
         "NOTION_MASTER_PAGE_ID": ["report-notion-parent-page-id"],
+        "SLACK_WEBHOOK_URL": ["report-slack-webhook-url"],
     }
     field_map: dict[str, bool] = {}
     for key in loaded_keys:

@@ -1,8 +1,11 @@
-"""Phase 4, Part 2 --- Send Slack notifications when cleanup PRs are opened.
+"""Phase 4, Part 2 --- Send a Slack summary when a report completes.
 
-Uses Slack Incoming Webhooks to post a message to a designated channel.
-Each message includes the PR link, last commit date for the code, and
-all reasons the code was deemed legacy.
+Uses Slack Incoming Webhooks to post a single summary message to a
+designated channel.  The message includes:
+
+- A link to the Notion database (report)
+- Links to all cleanup PRs that were opened
+- A count of total candidates processed
 """
 
 from __future__ import annotations
@@ -12,134 +15,127 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from src.reporter.notion_reporter import LAYER_DEFINITIONS, _layer_supports_removal
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _build_legacy_reasons(
-    layer_results: dict[str, Any],
-) -> list[str]:
-    """Extract human-readable reasons from layer results that support removal."""
-    reasons: list[str] = []
-
-    for layer_key, layer_name, field_key in LAYER_DEFINITIONS:
-        layer_data = layer_results.get(layer_key, {})
-        if not layer_data:
-            continue
-
-        supports = _layer_supports_removal(layer_key, field_key, layer_data)
-        if not supports:
-            continue
-
-        # Build a descriptive reason from each layer
-        if layer_key == "layer_1_reconfirm":
-            explanation = layer_data.get("explanation", "Detection confirmed as real code.")
-            reasons.append(f"*{layer_name}*: {explanation}")
-
-        elif layer_key == "layer_2_git_staleness":
-            days = layer_data.get("days_since_last_edit", "?")
-            last_date = layer_data.get("last_meaningful_edit_date", "unknown")
-            reasons.append(
-                f"*{layer_name}*: Code is stale — last meaningful edit "
-                f"was {days} days ago ({last_date})."
-            )
-
-        elif layer_key == "layer_3_active_development":
-            reasons.append(
-                f"*{layer_name}*: No active development found on this code."
-            )
-
-        elif layer_key == "layer_4_static_reachability":
-            reasons.append(
-                f"*{layer_name}*: Code is not reachable from any entry point."
-            )
-
-        elif layer_key == "layer_5_issue_archaeology":
-            sentiment = layer_data.get("overall_sentiment", "unknown")
-            reasons.append(
-                f"*{layer_name}*: Issue/discussion sentiment: {sentiment}."
-            )
-
-        elif layer_key == "layer_6_test_coverage":
-            reasons.append(
-                f"*{layer_name}*: No tests reference this candidate."
-            )
-
-        elif layer_key == "layer_7_runtime_signals":
-            reasons.append(
-                f"*{layer_name}*: Not referenced in infrastructure/deployment configs."
-            )
-
-        elif layer_key == "layer_8_external_consumers":
-            reasons.append(
-                f"*{layer_name}*: Symbol is not exported or consumed externally."
-            )
-
-    return reasons
+def _notion_url(database_id: str) -> str:
+    """Build a browser-friendly Notion URL from a database ID."""
+    clean_id = database_id.replace("-", "")
+    return f"https://www.notion.so/{clean_id}"
 
 
-def _build_slack_message(
-    candidate: dict[str, Any],
-    pr_url: str,
+def _build_summary_message(
+    notion_database_id: str | None,
+    pr_urls: list[dict[str, str]],
+    candidates_processed: int,
+    repo: str | None = None,
 ) -> dict[str, Any]:
-    """Build the Slack message payload for a single PR notification.
+    """Build a single Slack summary message using Block Kit.
 
-    Uses Slack Block Kit for rich formatting.
+    Args:
+        notion_database_id: The Notion database ID (may be ``None``).
+        pr_urls: List of dicts with ``candidate_id`` and ``pr_url``.
+        candidates_processed: Total number of candidates in the report.
+        repo: Optional repository name for the header.
     """
-    candidate_id = candidate.get("candidate_id", "unknown")
-    category = candidate.get("category", "unknown")
-    file_path = candidate.get("file", "unknown")
-    line = candidate.get("line", 0)
-    confidence = candidate.get("confidence", "?")
-    summary = candidate.get("summary", "No summary available.")
-    last_edit = candidate.get("last_meaningful_edit_date", "N/A")
-    layer_results = candidate.get("layer_results_raw", {})
-
-    reasons = _build_legacy_reasons(layer_results)
-    reasons_text = "\n".join(f"  - {r}" for r in reasons) if reasons else "  No specific reasons recorded."
+    # Header
+    header_text = "Dead Code Report Completed"
+    if repo:
+        header_text = f"Dead Code Report Completed --- {repo}"
 
     blocks: list[dict[str, Any]] = [
         {
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Cleanup PR Opened: {category}",
+                "text": header_text,
                 "emoji": True,
             },
         },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    f"*Candidate:* `{candidate_id}`\n"
-                    f"*File:* `{file_path}:{line}`\n"
-                    f"*Confidence:* {confidence}\n"
-                    f"*Last commit to this code:* {last_edit}\n"
-                    f"*PR:* <{pr_url}|View Pull Request>"
-                ),
-            },
-        },
-        {"type": "divider"},
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"*Summary:*\n{summary}",
-            },
-        },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"*Reasons deemed legacy:*\n{reasons_text}",
-            },
-        },
     ]
+
+    # Summary stats
+    stats_lines = [
+        f"*Candidates processed:* {candidates_processed}",
+        f"*Cleanup PRs opened:* {len(pr_urls)}",
+    ]
+
+    # Notion link
+    if notion_database_id:
+        url = _notion_url(notion_database_id)
+        stats_lines.append(f"*Notion Report:* <{url}|View in Notion>")
+
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "\n".join(stats_lines),
+        },
+    })
+
+    # PR links
+    if pr_urls:
+        blocks.append({"type": "divider"})
+
+        pr_lines: list[str] = []
+        for pr_info in pr_urls:
+            cid = pr_info["candidate_id"]
+            url = pr_info["pr_url"]
+            pr_lines.append(f"- `{cid}`: <{url}|View PR>")
+
+        # Slack blocks have a 3000-char text limit; chunk if needed
+        pr_text = "\n".join(pr_lines)
+        if len(pr_text) <= 2900:
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Opened PRs:*\n{pr_text}",
+                },
+            })
+        else:
+            # Split into multiple blocks
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Opened PRs:*",
+                },
+            })
+            chunk: list[str] = []
+            chunk_len = 0
+            for line in pr_lines:
+                if chunk_len + len(line) + 1 > 2900:
+                    blocks.append({
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "\n".join(chunk),
+                        },
+                    })
+                    chunk = []
+                    chunk_len = 0
+                chunk.append(line)
+                chunk_len += len(line) + 1
+            if chunk:
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "\n".join(chunk),
+                    },
+                })
+    elif candidates_processed > 0:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "_No cleanup PRs were opened for this report._",
+            },
+        })
 
     return {"blocks": blocks}
 
@@ -150,69 +146,54 @@ def _build_slack_message(
 
 
 class SlackNotifier:
-    """Send Slack notifications for cleanup PRs via incoming webhooks."""
+    """Send Slack report summary via incoming webhooks."""
 
     def __init__(self, webhook_url: str) -> None:
         self._webhook_url = webhook_url
 
-    def notify_pr_opened(
+    def notify_report_complete(
         self,
-        candidate: dict[str, Any],
-        pr_url: str,
+        notion_database_id: str | None,
+        cleanup_results: list[dict[str, Any]] | None,
+        candidates_processed: int,
+        repo: str | None = None,
     ) -> None:
-        """Send a Slack message about a single PR being opened.
+        """Send a single summary message when the report completes.
 
         Args:
-            candidate: A prepared candidate dict (from ``_extract_candidates``).
-            pr_url: The URL of the opened PR.
+            notion_database_id: Notion DB ID (or ``None`` if not used).
+            cleanup_results: Phase 3 results with ``pr_url`` and
+                ``candidate_ids``.
+            candidates_processed: Total candidates in the report.
+            repo: Optional repo name for the header.
 
         Raises:
             SlackNotifyError: If the webhook call fails.
         """
-        payload = _build_slack_message(candidate, pr_url)
+        # Collect all opened PR URLs
+        pr_urls: list[dict[str, str]] = []
+        if cleanup_results:
+            for pr_info in cleanup_results:
+                pr_url = pr_info.get("pr_url", "")
+                if not pr_url:
+                    continue
+                candidate_id = pr_info.get("candidate_id", "unknown")
+                pr_urls.append({
+                    "candidate_id": candidate_id,
+                    "pr_url": pr_url,
+                })
+
+        payload = _build_summary_message(
+            notion_database_id=notion_database_id,
+            pr_urls=pr_urls,
+            candidates_processed=candidates_processed,
+            repo=repo,
+        )
         self._send(payload)
         print(
-            f"[slack] Notified about PR for candidate "
-            f"{candidate.get('candidate_id', '?')}"
+            f"[slack] Sent report summary "
+            f"({candidates_processed} candidates, {len(pr_urls)} PRs)"
         )
-
-    def notify_batch(
-        self,
-        candidates: list[dict[str, Any]],
-        cleanup_results: list[dict[str, Any]],
-    ) -> int:
-        """Send Slack notifications for all candidates that have PRs.
-
-        Only candidates whose PR URL is present in *cleanup_results* will
-        generate a notification.
-
-        Args:
-            candidates: Prepared candidate rows (from ``_extract_candidates``).
-            cleanup_results: Phase 3 cleanup results with ``pr_url`` and
-                ``candidate_ids``.
-
-        Returns:
-            The number of notifications sent.
-        """
-        # Build lookup: candidate_id -> pr_url
-        pr_lookup: dict[str, str] = {}
-        for pr_info in cleanup_results:
-            pr_url = pr_info.get("pr_url", "")
-            if not pr_url:
-                continue
-            for cid in pr_info.get("candidate_ids", []):
-                pr_lookup[cid] = pr_url
-
-        sent = 0
-        for candidate in candidates:
-            cid = candidate.get("candidate_id", "")
-            pr_url = pr_lookup.get(cid, "")
-            if pr_url:
-                self.notify_pr_opened(candidate, pr_url)
-                sent += 1
-
-        print(f"[slack] Sent {sent} notification(s).")
-        return sent
 
     def _send(self, payload: dict[str, Any]) -> None:
         """Post a JSON payload to the Slack webhook URL."""
