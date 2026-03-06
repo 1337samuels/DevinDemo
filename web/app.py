@@ -173,6 +173,7 @@ def api_secrets():
         "API_V1_KEY": ["scan-v1-api-key", "validate-v1-api-key", "cleanup-v1-api-key", "runall-v1-api-key"],
         "ORG_ID": ["scan-org-id", "validate-org-id", "cleanup-org-id", "runall-org-id"],
         "SLACK_WEBHOOK_URL": ["report-slack-webhook-url", "runall-slack-webhook-url"],
+        "SLACK_WEBHOOKS_URL": ["report-slack-webhook-url", "runall-slack-webhook-url"],
         "NOTION_SECRET": ["report-notion-api-key", "runall-notion-api-key"],
         "NOTION_MASTER_PAGE_ID": ["report-notion-parent-page-id", "runall-notion-parent-page-id"],
     }

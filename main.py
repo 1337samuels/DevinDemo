@@ -422,6 +422,7 @@ _SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
     "NOTION_SECRET": ("notion_api_key", {"report"}),
     "NOTION_MASTER_PAGE_ID": ("notion_parent_page_id", {"report"}),
     "SLACK_WEBHOOK_URL": ("slack_webhook_url", {"report"}),
+    "SLACK_WEBHOOKS_URL": ("slack_webhook_url", {"report"}),
 }
 
 
@@ -678,7 +679,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument(
         "--slack-webhook-url",
-        default=_get_secret(secrets, "SLACK_WEBHOOK_URL"),
+        default=_get_secret(secrets, "SLACK_WEBHOOK_URL") or _get_secret(secrets, "SLACK_WEBHOOKS_URL"),
         help="Slack incoming webhook URL for report summary notification.",
     )
     report_p.set_defaults(func=cmd_report)
