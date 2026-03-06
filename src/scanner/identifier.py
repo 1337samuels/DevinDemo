@@ -136,10 +136,23 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
             "type": "object",
             "description": "High-level summary of the scan.",
             "properties": {
+                "total_files": {
+                    "type": "integer",
+                    "description": (
+                        "Total number of .py files in the repository. "
+                        "Set this FIRST before scanning any files."
+                    ),
+                },
                 "total_feature_flags": {"type": "integer"},
                 "total_dead_code": {"type": "integer"},
                 "total_tech_debt": {"type": "integer"},
-                "files_scanned": {"type": "integer"},
+                "files_scanned": {
+                    "type": "integer",
+                    "description": (
+                        "Number of .py files analysed so far. "
+                        "Update this after scanning each file."
+                    ),
+                },
                 "high_priority_items": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -147,6 +160,7 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                 },
             },
             "required": [
+                "total_files",
                 "total_feature_flags",
                 "total_dead_code",
                 "total_tech_debt",
@@ -171,6 +185,23 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
 _SCAN_PROMPT = """\
 You are a code-quality analyser.  Scan the Python files in the repository \
 **{repo}** and identify **all** of the following:
+
+## IMPORTANT — Progress tracking
+Before scanning any files, do the following:
+1. List every ``.py`` file in the repository.
+2. Count them and immediately set ``summary.total_files`` in the structured \
+   output to that number.
+3. Set ``summary.files_scanned`` to ``0``.
+
+Then, as you scan each file, **update the structured output** after every \
+file:
+- Increment ``summary.files_scanned`` by 1.
+- Update ``summary.total_feature_flags``, ``summary.total_dead_code``, and \
+  ``summary.total_tech_debt`` with the running totals.
+- Append any new findings to the ``feature_flags``, ``dead_code``, or \
+  ``tech_debt`` arrays.
+
+This lets the caller display real-time progress (e.g. "12 / 47 files, 26%").
 
 ## 1. Feature Flags
 Look for general feature-flag patterns — this project does NOT use a specific \
@@ -197,9 +228,9 @@ flag management system (e.g. LaunchDarkly).  Instead, look for:
   ``six`` library usage).
 
 ## Output
-Update the **structured output** as you scan.  After you finish, the \
-structured output MUST conform to the JSON schema provided and include \
-every finding you discovered.  Do NOT truncate results.
+Update the **structured output** after every file you scan (not just at the \
+end).  The final structured output MUST conform to the JSON schema provided \
+and include every finding you discovered.  Do NOT truncate results.
 
 Be thorough — scan every ``.py`` file in the repository.
 """

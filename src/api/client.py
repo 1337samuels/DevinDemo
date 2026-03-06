@@ -49,16 +49,49 @@ class DevinAPIClient:
     def _url(self, path: str) -> str:
         return f"{DEVIN_API_BASE_URL}/v3/organizations/{self._org_id}{path}"
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        resp = self._session.request(method, self._url(path), **kwargs)
-        if not resp.ok:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        _retries: int = 3,
+        _backoff: float = 2.0,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Send an HTTP request with automatic retry on transient 5xx errors.
+
+        Args:
+            _retries: Max number of retry attempts for 5xx responses.
+            _backoff: Base delay in seconds (doubles each retry).
+        """
+        last_exc: DevinAPIError | None = None
+        for attempt in range(_retries + 1):
+            resp = self._session.request(method, self._url(path), **kwargs)
+            if resp.ok:
+                return resp.json()
+
             detail = resp.text
             try:
                 detail = resp.json().get("detail", detail)
             except Exception:
                 pass
+
+            # Retry on transient server errors (502, 503, 504)
+            if resp.status_code in {502, 503, 504} and attempt < _retries:
+                wait = _backoff * (2**attempt)
+                print(
+                    f"[api] {method} {path} returned {resp.status_code}, "
+                    f"retrying in {wait:.0f}s ({attempt + 1}/{_retries}) …"
+                )
+                time.sleep(wait)
+                last_exc = DevinAPIError(resp.status_code, str(detail))
+                continue
+
             raise DevinAPIError(resp.status_code, str(detail))
-        return resp.json()
+
+        # Should not reach here, but satisfy the type checker.
+        assert last_exc is not None  # noqa: S101
+        raise last_exc
 
     # ------------------------------------------------------------------
     # Sessions
