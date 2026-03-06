@@ -666,7 +666,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_p.add_argument(
         "--slack-webhook-url",
         default=_get_secret(secrets, "SLACK_WEBHOOK_URL"),
-        help="Slack incoming webhook URL for PR notifications.",
+        help="Slack incoming webhook URL for report summary notification.",
     )
     report_p.set_defaults(func=cmd_report)
 
