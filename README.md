@@ -200,6 +200,30 @@ The v3 API's `send_message` endpoint requires the `ManageOrgSessions` permission
 
 If you have a **Teams** account, you can use the [v1 `send_message` endpoint](https://docs.devin.ai/api-reference/v1/sessions/send-a-message-to-an-existing-devin-session) instead. It accepts Personal API Keys (`apk_user_*`) and Service API Keys (`apk_*`), which are available on all account tiers. The `send_message.py` script wraps this endpoint for convenience.
 
+## Web GUI
+
+A browser-based interface for running all pipeline phases with live console output streaming.
+
+### Running the web server
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start the server
+python web/app.py
+```
+
+The GUI is available at **http://localhost:5000**.
+
+### Features
+
+- **Tab navigation** across all four phases (Scan, Validate, Cleanup, Report)
+- **Form inputs** for all CLI arguments, including password-masked fields for API keys
+- **Live console output** streamed in real time via WebSocket as the subprocess runs
+- **Stop button** to terminate a running process
+- **File discovery dropdowns** — for phases that require input files (Validate, Report), the server automatically scans the `results/` directory and presents matching files in a dropdown showing `owner/repo — YYYY-MM-DD HH:MM:SS UTC`. A "Custom path…" option is available as a fallback.
+
 ## Project structure
 
 ```
@@ -214,11 +238,18 @@ DevinDemo/
 │   ├── scanner/
 │   │   └── identifier.py       # Part 1: Identification (implemented)
 │   ├── validator/
-│   │   └── validator.py        # Part 2: Validation (stub)
+│   │   └── validator.py        # Part 2: Validation (implemented)
 │   ├── cleanup/
 │   │   └── cleanup.py          # Part 3: Cleanup PR generation (stub)
 │   └── reporter/
-│       └── reporter.py         # Part 4: Reporting (stub)
+│       ├── reporter.py         # Part 4: Reporting orchestrator
+│       ├── notion_reporter.py  # Notion database integration
+│       └── slack_notifier.py   # Slack webhook notifications
+├── web/
+│   ├── app.py                  # Flask + SocketIO web server
+│   └── templates/
+│       └── index.html          # Single-page GUI
+└── results/                    # Output files from pipeline runs
 ```
 
 ## Assumptions & limitations
