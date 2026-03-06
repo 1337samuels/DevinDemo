@@ -236,11 +236,7 @@
 
         .btn-secondary:hover { background: var(--surface-hover); }
 
-        /* Console */
-        .console-wrapper {
-            margin-top: 2rem;
-        }
-
+        /* Console header (shared by all per-phase consoles) */
         .console-header {
             display: flex;
             align-items: center;
@@ -278,29 +274,61 @@
             50% { opacity: 0.4; }
         }
 
-        #console {
+        /* Console grid — 2x2 layout for per-phase consoles */
+        .consoles-container {
+            padding-top: 0;
+        }
+
+        .console-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .console-panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .console-actions {
+            display: flex;
+            gap: 0.375rem;
+            align-items: center;
+        }
+
+        .btn-sm {
+            padding: 0.3rem 0.75rem;
+            font-size: 0.75rem;
+        }
+
+        .console {
             background: #0a0c10;
             border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 1rem;
+            padding: 0.75rem;
             font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-            font-size: 0.8125rem;
-            line-height: 1.6;
-            height: 400px;
+            font-size: 0.75rem;
+            line-height: 1.5;
+            height: 280px;
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-all;
             color: #a8b2c4;
         }
 
-        #console .cmd { color: var(--accent); }
-        #console .error { color: var(--red); }
-        #console .success { color: var(--green); }
+        .console .cmd { color: var(--accent); }
+        .console .error { color: var(--red); }
+        .console .success { color: var(--green); }
 
-        /* Scrollbar */
-        #console::-webkit-scrollbar { width: 6px; }
-        #console::-webkit-scrollbar-track { background: transparent; }
-        #console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .console::-webkit-scrollbar { width: 6px; }
+        .console::-webkit-scrollbar-track { background: transparent; }
+        .console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        @media (max-width: 900px) {
+            .console-grid {
+                grid-template-columns: 1fr;
+            }
+        }
 
         /* Dashboard pipeline progress */
         .pipeline-progress {
@@ -530,7 +558,7 @@
             <button class="tab active" data-phase="dashboard">Dashboard</button>
             <button class="tab" data-phase="scan">Phase 1: Scan</button>
             <button class="tab" data-phase="validate">Phase 2: Validate</button>
-            <button class="tab" data-phase="cleanup">Phase 3: Cleanup</button>
+            <button class="tab" data-phase="cleanup">Phase 3: Cleanup PR's</button>
             <button class="tab" data-phase="report">Phase 4: Report</button>
         </div>
 
@@ -662,6 +690,19 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Scan console -->
+            <div class="console-panel" id="console-panel-scan">
+                <div class="console-header">
+                    <h3><span class="status-dot" id="status-dot-scan"></span> Console</h3>
+                    <div class="console-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-run-scan" onclick="runPhase('scan')">Run</button>
+                        <button class="btn btn-danger btn-sm" id="btn-stop-scan" onclick="stopProcess('scan')" style="display:none;">Stop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('scan')">Clear</button>
+                    </div>
+                </div>
+                <div class="console" id="console-scan"></div>
+            </div>
         </div>
 
         <!-- Phase 2: Validate -->
@@ -745,12 +786,25 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Validate console -->
+            <div class="console-panel" id="console-panel-validate">
+                <div class="console-header">
+                    <h3><span class="status-dot" id="status-dot-validate"></span> Console</h3>
+                    <div class="console-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-run-validate" onclick="runPhase('validate')">Run</button>
+                        <button class="btn btn-danger btn-sm" id="btn-stop-validate" onclick="stopProcess('validate')" style="display:none;">Stop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('validate')">Clear</button>
+                    </div>
+                </div>
+                <div class="console" id="console-validate"></div>
+            </div>
         </div>
 
-        <!-- Phase 3: Cleanup -->
+        <!-- Phase 3: Cleanup PR's -->
         <div class="phase-panel" id="panel-cleanup">
             <div class="form-grid">
-                <div class="section-label">Cleanup Configuration</div>
+                <div class="section-label">Cleanup PR's Configuration</div>
                 <div class="form-group">
                     <label>Input File (Phase 2 Validate Results) <span class="required">*</span></label>
                     <div class="file-selector">
@@ -806,6 +860,19 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Cleanup PR's console -->
+            <div class="console-panel" id="console-panel-cleanup">
+                <div class="console-header">
+                    <h3><span class="status-dot" id="status-dot-cleanup"></span> Console</h3>
+                    <div class="console-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-run-cleanup" onclick="runPhase('cleanup')">Run</button>
+                        <button class="btn btn-danger btn-sm" id="btn-stop-cleanup" onclick="stopProcess('cleanup')" style="display:none;">Stop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('cleanup')">Clear</button>
+                    </div>
+                </div>
+                <div class="console" id="console-cleanup"></div>
+            </div>
         </div>
 
         <!-- Phase 4: Report -->
@@ -824,7 +891,7 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Cleanup Results File</label>
+                    <label>Cleanup PR's Results File</label>
                     <div class="file-selector">
                         <select id="report-cleanup-results" data-file-type="cleanup" class="file-dropdown">
                             <option value="">Loading...</option>
@@ -865,36 +932,29 @@
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Actions: single phase -->
-        <div class="actions" id="actions-single" style="display:none;">
-            <button class="btn btn-primary" id="btn-run" onclick="runPhase()">Run</button>
-            <button class="btn btn-danger" id="btn-stop" onclick="stopProcess()" style="display:none;">Stop</button>
-            <button class="btn btn-secondary" onclick="clearConsole()">Clear Console</button>
-        </div>
-
-        <!-- Actions: run all (dashboard) -->
-        <div class="actions" id="actions-runall">
-            <button class="btn btn-primary" id="btn-run-all" onclick="runAll()">Run All Phases</button>
-            <button class="btn btn-danger" id="btn-stop-all" onclick="stopProcess()" style="display:none;">Stop</button>
-            <button class="btn btn-secondary" onclick="clearConsole()">Clear Console</button>
-        </div>
-
-        <!-- Console output -->
-        <div class="console-wrapper">
-            <div class="console-header">
-                <h3><span class="status-dot" id="status-dot"></span> Console Output</h3>
+            <!-- Report console -->
+            <div class="console-panel" id="console-panel-report">
+                <div class="console-header">
+                    <h3><span class="status-dot" id="status-dot-report"></span> Console</h3>
+                    <div class="console-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-run-report" onclick="runPhase('report')">Run</button>
+                        <button class="btn btn-danger btn-sm" id="btn-stop-report" onclick="stopProcess('report')" style="display:none;">Stop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('report')">Clear</button>
+                    </div>
+                </div>
+                <div class="console" id="console-report"></div>
             </div>
-            <div id="console"></div>
         </div>
     </div>
 
     <script>
         const socket = io();
         let currentPhase = 'dashboard';
-        let isRunning = false;
         let runAllActive = false;
+
+        // Per-phase running state
+        const phaseRunning = { scan: false, validate: false, cleanup: false, report: false };
 
         // ----- Validation layer checkboxes -----
 
@@ -1047,6 +1107,46 @@
         }
         loadAllDropdowns();
 
+        // ----- Dashboard: move console panels in/out of the grid -----
+
+        const PHASES = ['scan', 'validate', 'cleanup', 'report'];
+        const PHASE_LABELS = {
+            scan: 'Phase 1: Scan',
+            validate: 'Phase 2: Validate',
+            cleanup: "Phase 3: Cleanup PR's",
+            report: 'Phase 4: Report'
+        };
+        const dashboardGrid = document.getElementById('dashboard-grid');
+
+        // Original parent locations so we can move consoles back
+        const consoleHomeParent = {};
+        PHASES.forEach(function(p) {
+            const panel = document.getElementById('console-panel-' + p);
+            consoleHomeParent[p] = panel.parentElement;
+        });
+
+        function populateDashboard() {
+            PHASES.forEach(function(p) {
+                const panel = document.getElementById('console-panel-' + p);
+                // Update header to show phase name in dashboard view
+                panel.querySelector('.console-header h3').innerHTML =
+                    '<span class="status-dot' +
+                    (phaseRunning[p] ? ' running' : '') +
+                    '" id="status-dot-' + p + '"></span> ' + PHASE_LABELS[p];
+                dashboardGrid.appendChild(panel);
+            });
+        }
+
+        function restoreConsole(phase) {
+            const panel = document.getElementById('console-panel-' + phase);
+            // Restore simple "Console" header when inside its own phase tab
+            panel.querySelector('.console-header h3').innerHTML =
+                '<span class="status-dot' +
+                (phaseRunning[phase] ? ' running' : '') +
+                '" id="status-dot-' + phase + '"></span> Console';
+            consoleHomeParent[phase].appendChild(panel);
+        }
+
         // ----- Secrets auto-fill -----
         // Track which fields have secrets loaded so runPhase can skip them
         let secretFields = {};
@@ -1078,68 +1178,83 @@
                 tab.classList.add('active');
                 currentPhase = tab.dataset.phase;
                 document.getElementById('panel-' + currentPhase).classList.add('active');
-                // Show/hide the correct action buttons
+
                 if (currentPhase === 'dashboard') {
-                    document.getElementById('actions-single').style.display = 'none';
-                    document.getElementById('actions-runall').style.display = 'flex';
+                    populateDashboard();
                 } else {
-                    document.getElementById('actions-single').style.display = 'flex';
-                    document.getElementById('actions-runall').style.display = 'none';
+                    // Move all consoles back to their home panels
+                    PHASES.forEach(restoreConsole);
                 }
                 loadAllDropdowns();
             });
         });
 
-        // Console output
-        const consoleEl = document.getElementById('console');
-        const statusDot = document.getElementById('status-dot');
+        // ----- Per-phase console output via SocketIO -----
 
-        socket.on('console_output', (msg) => {
-            const text = msg.data;
-            const phase = msg.phase; // set during run_all pipeline
-
-            // Determine which console(s) to write to
-            const targets = [];
-            if (phase && runAllActive) {
-                // Route to the per-phase dashboard console
-                const dashPanel = document.getElementById('console-' + phase);
-                if (dashPanel) targets.push(dashPanel);
-            }
-            // Always write to the shared console as well
-            targets.push(consoleEl);
-
-            targets.forEach(target => {
+        function setupPhaseConsole(phase) {
+            // Query DOM dynamically (elements move between phase panels and dashboard)
+            socket.on('console_output_' + phase, (msg) => {
+                const consoleEl = document.getElementById('console-' + phase);
+                if (!consoleEl) return;
                 const span = document.createElement('span');
+                const text = msg.data;
                 if (text.startsWith('$')) {
                     span.className = 'cmd';
                 }
                 span.textContent = text;
-                target.appendChild(span);
-                target.scrollTop = target.scrollHeight;
+                consoleEl.appendChild(span);
+                consoleEl.scrollTop = consoleEl.scrollHeight;
             });
+
+            socket.on('process_done_' + phase, (msg) => {
+                const consoleEl = document.getElementById('console-' + phase);
+                if (!consoleEl) return;
+                const span = document.createElement('span');
+                span.className = msg.success ? 'success' : 'error';
+                span.textContent = msg.data;
+                consoleEl.appendChild(span);
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+
+                phaseRunning[phase] = false;
+                const statusDot = document.getElementById('status-dot-' + phase);
+                if (statusDot) statusDot.className = msg.success ? 'status-dot success' : 'status-dot error';
+                document.getElementById('btn-run-' + phase).disabled = false;
+                document.getElementById('btn-stop-' + phase).style.display = 'none';
+                // Refresh dropdowns after process finishes (new result files may exist)
+                loadAllDropdowns();
+            });
+        }
+
+        // Register listeners for each phase
+        ['scan', 'validate', 'cleanup', 'report'].forEach(setupPhaseConsole);
+
+        // Also listen for console_output (used by run_all pipeline with phase field)
+        socket.on('console_output', (msg) => {
+            const text = msg.data;
+            const phase = msg.phase;
+            if (phase && runAllActive) {
+                const dashPanel = document.getElementById('console-' + phase);
+                if (dashPanel) {
+                    const span = document.createElement('span');
+                    if (text.startsWith('$')) span.className = 'cmd';
+                    span.textContent = text;
+                    dashPanel.appendChild(span);
+                    dashPanel.scrollTop = dashPanel.scrollHeight;
+                }
+            }
         });
 
+        // Listen for process_done from run_all pipeline
         socket.on('process_done', (msg) => {
-            const span = document.createElement('span');
-            span.className = msg.success ? 'success' : 'error';
-            span.textContent = msg.data;
-            consoleEl.appendChild(span);
-            consoleEl.scrollTop = consoleEl.scrollHeight;
-
-            isRunning = false;
-            statusDot.className = msg.success ? 'status-dot success' : 'status-dot error';
-
             if (runAllActive) {
                 runAllActive = false;
                 document.getElementById('btn-run-all').disabled = false;
                 document.getElementById('btn-stop-all').style.display = 'none';
-                // Update pipeline progress on completion
                 if (msg.success) {
                     for (let i = 0; i < 4; i++) {
                         document.getElementById('pipeline-step-' + i).className = 'pipeline-step done';
                     }
                 } else {
-                    // Mark the currently active step as failed
                     for (let i = 0; i < 4; i++) {
                         const step = document.getElementById('pipeline-step-' + i);
                         if (step.classList.contains('active')) {
@@ -1147,13 +1262,11 @@
                         }
                     }
                 }
-            } else {
-                document.getElementById('btn-run').disabled = false;
-                document.getElementById('btn-stop').style.display = 'none';
+                loadAllDropdowns();
             }
-            // Refresh dropdowns after process finishes (new result files may exist)
-            loadAllDropdowns();
         });
+
+        // ----- Helpers -----
 
         function getVal(id) {
             const el = document.getElementById(id);
@@ -1168,7 +1281,7 @@
         // ----- Run All -----
 
         function runAll() {
-            if (isRunning) return;
+            if (runAllActive) return;
 
             const repo = getVal('runall-repo');
             if (!repo) {
@@ -1187,9 +1300,7 @@
                 slack_webhook_url: getVal('runall-slack-webhook-url') || null,
             };
 
-            isRunning = true;
             runAllActive = true;
-            statusDot.className = 'status-dot running';
             document.getElementById('btn-run-all').disabled = true;
             document.getElementById('btn-stop-all').style.display = 'inline-block';
 
@@ -1220,8 +1331,11 @@
             }
         });
 
-        function runPhase() {
-            if (isRunning) return;
+        // ----- Run / Stop / Clear per phase -----
+
+        function runPhase(phase) {
+            if (!phase) phase = currentPhase;
+            if (phaseRunning[phase]) return;
 
             let args = {};
 
@@ -1230,7 +1344,7 @@
                 return !!secretFields[fieldId];
             }
 
-            if (currentPhase === 'scan') {
+            if (phase === 'scan') {
                 const apiKey = getVal('scan-api-key');
                 const v1ApiKey = getVal('scan-v1-api-key');
                 const orgId = getVal('scan-org-id');
@@ -1254,7 +1368,7 @@
                     poll_timeout: getNumVal('scan-poll-timeout'),
                     max_acu: getNumVal('scan-max-acu'),
                 };
-            } else if (currentPhase === 'validate') {
+            } else if (phase === 'validate') {
                 const apiKey = getVal('validate-api-key');
                 const v1ApiKey = getVal('validate-v1-api-key');
                 const orgId = getVal('validate-org-id');
@@ -1289,7 +1403,7 @@
                     issue_lookback_days: getNumVal('validate-issue-lookback-days'),
                     layers: (checkedCount < totalLayers) ? selectedLayers : null,
                 };
-            } else if (currentPhase === 'cleanup') {
+            } else if (phase === 'cleanup') {
                 const apiKey = getVal('cleanup-api-key');
                 const v1ApiKey = getVal('cleanup-v1-api-key');
                 const orgId = getVal('cleanup-org-id');
@@ -1313,7 +1427,7 @@
                     max_acu: getNumVal('cleanup-max-acu'),
                     auto_merge: autoMerge,
                 };
-            } else if (currentPhase === 'report') {
+            } else if (phase === 'report') {
                 const inputFile = getFilePath('report-input');
                 if (!inputFile) {
                     alert('Input File is required.');
@@ -1330,26 +1444,33 @@
                 };
             }
 
-            isRunning = true;
-            statusDot.className = 'status-dot running';
-            document.getElementById('btn-run').disabled = true;
-            document.getElementById('btn-stop').style.display = 'inline-block';
+            phaseRunning[phase] = true;
+            document.getElementById('status-dot-' + phase).className = 'status-dot running';
+            document.getElementById('btn-run-' + phase).disabled = true;
+            document.getElementById('btn-stop-' + phase).style.display = 'inline-block';
 
-            socket.emit('run_phase', { phase: currentPhase, args: args });
+            socket.emit('run_phase', { phase: phase, args: args });
         }
 
-        function stopProcess() {
-            socket.emit('stop_process');
+        function stopProcess(phase) {
+            if (!phase) phase = currentPhase;
+            socket.emit('stop_process', { phase: phase });
         }
 
-        function clearConsole() {
-            consoleEl.innerHTML = '';
-            statusDot.className = 'status-dot';
-            // Also clear dashboard per-phase consoles
-            ['scan', 'validate', 'cleanup', 'report'].forEach(p => {
-                const el = document.getElementById('console-' + p);
-                if (el) el.innerHTML = '';
-            });
+        function clearConsole(phase) {
+            if (!phase) phase = currentPhase;
+            if (phase === 'dashboard') {
+                // Clear all dashboard per-phase consoles
+                ['scan', 'validate', 'cleanup', 'report'].forEach(p => {
+                    const el = document.getElementById('console-' + p);
+                    if (el) el.innerHTML = '';
+                });
+                return;
+            }
+            const el = document.getElementById('console-' + phase);
+            if (el) el.innerHTML = '';
+            const dot = document.getElementById('status-dot-' + phase);
+            if (dot && !phaseRunning[phase]) dot.className = 'status-dot';
         }
     </script>
 </body>

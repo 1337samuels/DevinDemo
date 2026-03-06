@@ -25,7 +25,13 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "devindemo-gui"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Track the running process so we can cancel it
+# Per-phase process tracking — each phase can run concurrently,
+# but only one run per phase at a time.
+_VALID_PHASES = {"scan", "validate", "cleanup", "report"}
+_phase_processes: dict[str, subprocess.Popen | None] = {p: None for p in _VALID_PHASES}
+_phase_lock = threading.Lock()
+
+# "Run All" pipeline process tracking — prevents concurrent full-pipeline runs.
 _current_process: subprocess.Popen | None = None
 _process_lock = threading.Lock()
 
@@ -81,12 +87,14 @@ def _discover_result_files(prefix: str) -> list[dict]:
         except (json.JSONDecodeError, OSError):
             pass
 
-        results.append({
-            "path": rel_path,
-            "repo": repo,
-            "datetime": dt_str,
-            "label": f"{repo}  \u2014  {dt_str}",
-        })
+        results.append(
+            {
+                "path": rel_path,
+                "repo": repo,
+                "datetime": dt_str,
+                "label": f"{repo}  \u2014  {dt_str}",
+            }
+        )
 
     # Sort newest first (by datetime string, which is lexicographically sortable)
     results.sort(key=lambda r: r["datetime"], reverse=True)
@@ -113,7 +121,7 @@ def api_secrets():
         "API_V3_KEY": ["scan-api-key", "validate-api-key", "cleanup-api-key", "runall-api-key"],
         "API_V1_KEY": ["scan-v1-api-key", "validate-v1-api-key", "cleanup-v1-api-key", "runall-v1-api-key"],
         "ORG_ID": ["scan-org-id", "validate-org-id", "cleanup-org-id", "runall-org-id"],
-        "SLACK_WEBHOOK_URL": ["runall-slack-webhook-url"],
+        "SLACK_WEBHOOK_URL": ["report-slack-webhook-url", "runall-slack-webhook-url"],
         "NOTION_SECRET": ["report-notion-api-key", "runall-notion-api-key"],
         "NOTION_MASTER_PAGE_ID": ["report-notion-parent-page-id", "runall-notion-parent-page-id"],
     }
@@ -144,7 +152,10 @@ def api_results(prefix: str):
 
 # Keys/secrets that should be masked in console output
 _SECRET_FLAGS = {
-    "--api-key", "--v1-api-key", "--notion-api-key", "--slack-webhook-url",
+    "--api-key",
+    "--v1-api-key",
+    "--notion-api-key",
+    "--slack-webhook-url",
 }
 
 
@@ -164,11 +175,17 @@ def _mask_cmd(cmd: list[str]) -> str:
     return " ".join(parts)
 
 
-def _stream_process(cmd: list[str], sid: str) -> None:
-    """Run a subprocess and stream its stdout/stderr to the client via SocketIO."""
-    global _current_process
+def _stream_process(cmd: list[str], phase: str, sid: str) -> None:
+    """Run a subprocess and stream its stdout/stderr to the client via SocketIO.
 
-    socketio.emit("console_output", {"data": f"$ {_mask_cmd(cmd)}\n"}, to=sid)
+    Each phase emits to its own ``console_output_<phase>`` and
+    ``process_done_<phase>`` events so the frontend can display them in
+    separate console panels.
+    """
+    out_event = f"console_output_{phase}"
+    done_event = f"process_done_{phase}"
+
+    socketio.emit(out_event, {"data": f"$ {_mask_cmd(cmd)}\n"}, to=sid)
 
     try:
         proc = subprocess.Popen(
@@ -181,36 +198,39 @@ def _stream_process(cmd: list[str], sid: str) -> None:
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
-        with _process_lock:
-            _current_process = proc
+        with _phase_lock:
+            _phase_processes[phase] = proc
 
         for line in proc.stdout:
-            socketio.emit("console_output", {"data": line}, to=sid)
+            socketio.emit(out_event, {"data": line}, to=sid)
 
         proc.wait()
         exit_code = proc.returncode
 
         if exit_code == 0:
             socketio.emit(
-                "process_done",
-                {"data": "\nProcess finished successfully (exit code 0)\n", "success": True},
+                done_event,
+                {
+                    "data": "\nProcess finished successfully (exit code 0)\n",
+                    "success": True,
+                },
                 to=sid,
             )
         else:
             socketio.emit(
-                "process_done",
+                done_event,
                 {"data": f"\nProcess exited with code {exit_code}\n", "success": False},
                 to=sid,
             )
     except Exception as exc:
         socketio.emit(
-            "process_done",
+            done_event,
             {"data": f"\nError: {exc}\n", "success": False},
             to=sid,
         )
     finally:
-        with _process_lock:
-            _current_process = None
+        with _phase_lock:
+            _phase_processes[phase] = None
 
 
 @socketio.on("run_phase")
@@ -222,12 +242,23 @@ def handle_run_phase(data):
 
     if not sid:
         from flask import request as flask_request
+
         sid = flask_request.sid
 
-    # Check if a process is already running
-    with _process_lock:
-        if _current_process is not None and _current_process.poll() is None:
-            emit("console_output", {"data": "A process is already running. Please wait or stop it first.\n"})
+    if phase not in _VALID_PHASES:
+        emit(f"console_output_{phase}", {"data": f"Unknown phase: {phase}\n"})
+        return
+
+    # Check if this specific phase already has a running process
+    with _phase_lock:
+        proc = _phase_processes.get(phase)
+        if proc is not None and proc.poll() is None:
+            emit(
+                f"console_output_{phase}",
+                {
+                    "data": f"Phase '{phase}' is already running. Please wait or stop it first.\n"
+                },
+            )
             return
 
     cmd = [sys.executable, "main.py"]
@@ -332,10 +363,14 @@ def handle_run_phase(data):
         emit("error", {"data": f"Unknown phase: {phase}\n"})
         return
 
-    # Run in a background thread so we don't block
+    # Run in a background thread so we don't block.
+    # Each phase runs independently — multiple phases can execute concurrently.
     from flask import request as flask_request
+
     client_sid = flask_request.sid
-    thread = threading.Thread(target=_stream_process, args=(cmd, client_sid), daemon=True)
+    thread = threading.Thread(
+        target=_stream_process, args=(cmd, phase, client_sid), daemon=True
+    )
     thread.start()
 
 
@@ -385,6 +420,10 @@ def _run_phase_subprocess(cmd: list[str], sid: str, phase: str | None = None) ->
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
+        # Update _current_process so handle_stop can terminate this subprocess,
+        # but do NOT clear it in `finally` — the caller (_run_all_pipeline)
+        # is responsible for clearing _current_process when the entire
+        # pipeline finishes, preventing a race window between phases.
         with _process_lock:
             _current_process = proc
 
@@ -396,9 +435,6 @@ def _run_phase_subprocess(cmd: list[str], sid: str, phase: str | None = None) ->
     except Exception as exc:
         _emit_console(f"\nError: {exc}\n")
         return -1
-    finally:
-        with _process_lock:
-            _current_process = None
 
 
 _PHASE_NAMES = ["Phase 1: Scan", "Phase 2: Validate", "Phase 3: Cleanup", "Phase 4: Report"]
@@ -408,6 +444,8 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
     """Run all four phases sequentially, chaining outputs.
 
     Stops immediately if any phase exits with a non-zero code.
+    _current_process is kept set for the entire pipeline duration to prevent
+    concurrent runs; it is only cleared in the ``finally`` block.
     """
     repo = args.get("repo", "")
     api_key = args.get("api_key") or None
@@ -429,107 +467,113 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
         }, to=sid)
         socketio.emit("run_all_phase", {"phase_index": phase_idx}, to=sid)
 
-    # ---- Phase 1: Scan ----
-    _header(0)
-    cmd_scan = [sys.executable, "main.py", "scan"]
-    if api_key:
-        cmd_scan.extend(["--api-key", api_key])
-    if v1_api_key:
-        cmd_scan.extend(["--v1-api-key", v1_api_key])
-    if org_id:
-        cmd_scan.extend(["--org-id", org_id])
-    cmd_scan.append(repo)
+    try:
+        # ---- Phase 1: Scan ----
+        _header(0)
+        cmd_scan = [sys.executable, "main.py", "scan"]
+        if api_key:
+            cmd_scan.extend(["--api-key", api_key])
+        if v1_api_key:
+            cmd_scan.extend(["--v1-api-key", v1_api_key])
+        if org_id:
+            cmd_scan.extend(["--org-id", org_id])
+        cmd_scan.append(repo)
 
-    rc = _run_phase_subprocess(cmd_scan, sid, phase="scan")
-    if rc != 0:
+        rc = _run_phase_subprocess(cmd_scan, sid, phase="scan")
+        if rc != 0:
+            socketio.emit("process_done", {
+                "data": f"\nPipeline stopped: Phase 1 (Scan) failed with exit code {rc}\n",
+                "success": False,
+            }, to=sid)
+            return
+
+        scan_output = _find_latest_result("scan")
+        if not scan_output:
+            socketio.emit("process_done", {
+                "data": "\nPipeline stopped: no scan output file found.\n",
+                "success": False,
+            }, to=sid)
+            return
+
+        # ---- Phase 2: Validate ----
+        _header(1)
+        cmd_validate = [sys.executable, "main.py", "validate"]
+        if api_key:
+            cmd_validate.extend(["--api-key", api_key])
+        if v1_api_key:
+            cmd_validate.extend(["--v1-api-key", v1_api_key])
+        if org_id:
+            cmd_validate.extend(["--org-id", org_id])
+        cmd_validate.append(scan_output)
+
+        rc = _run_phase_subprocess(cmd_validate, sid, phase="validate")
+        if rc != 0:
+            socketio.emit("process_done", {
+                "data": f"\nPipeline stopped: Phase 2 (Validate) failed with exit code {rc}\n",
+                "success": False,
+            }, to=sid)
+            return
+
+        validate_output = _find_latest_result("validate")
+        if not validate_output:
+            socketio.emit("process_done", {
+                "data": "\nPipeline stopped: no validate output file found.\n",
+                "success": False,
+            }, to=sid)
+            return
+
+        # ---- Phase 3: Cleanup ----
+        _header(2)
+        cmd_cleanup = [sys.executable, "main.py", "cleanup"]
+        if api_key:
+            cmd_cleanup.extend(["--api-key", api_key])
+        if v1_api_key:
+            cmd_cleanup.extend(["--v1-api-key", v1_api_key])
+        if org_id:
+            cmd_cleanup.extend(["--org-id", org_id])
+        cmd_cleanup.append(validate_output)
+
+        rc = _run_phase_subprocess(cmd_cleanup, sid, phase="cleanup")
+        if rc != 0:
+            socketio.emit("process_done", {
+                "data": f"\nPipeline stopped: Phase 3 (Cleanup) failed with exit code {rc}\n",
+                "success": False,
+            }, to=sid)
+            return
+
+        cleanup_output = _find_latest_result("cleanup")
+
+        # ---- Phase 4: Report ----
+        _header(3)
+        cmd_report = [sys.executable, "main.py", "report", "--input", validate_output]
+        if cleanup_output:
+            cmd_report.extend(["--cleanup-results", cleanup_output])
+        if notion_api_key:
+            cmd_report.extend(["--notion-api-key", notion_api_key])
+        if notion_database_id:
+            cmd_report.extend(["--notion-database-id", notion_database_id])
+        if notion_parent_page_id:
+            cmd_report.extend(["--notion-parent-page-id", notion_parent_page_id])
+        if slack_webhook_url:
+            cmd_report.extend(["--slack-webhook-url", slack_webhook_url])
+
+        rc = _run_phase_subprocess(cmd_report, sid, phase="report")
+        if rc != 0:
+            socketio.emit("process_done", {
+                "data": f"\nPipeline stopped: Phase 4 (Report) failed with exit code {rc}\n",
+                "success": False,
+            }, to=sid)
+            return
+
         socketio.emit("process_done", {
-            "data": f"\nPipeline stopped: Phase 1 (Scan) failed with exit code {rc}\n",
-            "success": False,
+            "data": "\n" + "=" * 60 + "\n  All 4 phases completed successfully!\n" + "=" * 60 + "\n",
+            "success": True,
         }, to=sid)
-        return
-
-    scan_output = _find_latest_result("scan")
-    if not scan_output:
-        socketio.emit("process_done", {
-            "data": "\nPipeline stopped: no scan output file found.\n",
-            "success": False,
-        }, to=sid)
-        return
-
-    # ---- Phase 2: Validate ----
-    _header(1)
-    cmd_validate = [sys.executable, "main.py", "validate"]
-    if api_key:
-        cmd_validate.extend(["--api-key", api_key])
-    if v1_api_key:
-        cmd_validate.extend(["--v1-api-key", v1_api_key])
-    if org_id:
-        cmd_validate.extend(["--org-id", org_id])
-    cmd_validate.append(scan_output)
-
-    rc = _run_phase_subprocess(cmd_validate, sid, phase="validate")
-    if rc != 0:
-        socketio.emit("process_done", {
-            "data": f"\nPipeline stopped: Phase 2 (Validate) failed with exit code {rc}\n",
-            "success": False,
-        }, to=sid)
-        return
-
-    validate_output = _find_latest_result("validate")
-    if not validate_output:
-        socketio.emit("process_done", {
-            "data": "\nPipeline stopped: no validate output file found.\n",
-            "success": False,
-        }, to=sid)
-        return
-
-    # ---- Phase 3: Cleanup ----
-    _header(2)
-    cmd_cleanup = [sys.executable, "main.py", "cleanup"]
-    if api_key:
-        cmd_cleanup.extend(["--api-key", api_key])
-    if v1_api_key:
-        cmd_cleanup.extend(["--v1-api-key", v1_api_key])
-    if org_id:
-        cmd_cleanup.extend(["--org-id", org_id])
-    cmd_cleanup.append(validate_output)
-
-    rc = _run_phase_subprocess(cmd_cleanup, sid, phase="cleanup")
-    if rc != 0:
-        socketio.emit("process_done", {
-            "data": f"\nPipeline stopped: Phase 3 (Cleanup) failed with exit code {rc}\n",
-            "success": False,
-        }, to=sid)
-        return
-
-    cleanup_output = _find_latest_result("cleanup")
-
-    # ---- Phase 4: Report ----
-    _header(3)
-    cmd_report = [sys.executable, "main.py", "report", "--input", validate_output]
-    if cleanup_output:
-        cmd_report.extend(["--cleanup-results", cleanup_output])
-    if notion_api_key:
-        cmd_report.extend(["--notion-api-key", notion_api_key])
-    if notion_database_id:
-        cmd_report.extend(["--notion-database-id", notion_database_id])
-    if notion_parent_page_id:
-        cmd_report.extend(["--notion-parent-page-id", notion_parent_page_id])
-    if slack_webhook_url:
-        cmd_report.extend(["--slack-webhook-url", slack_webhook_url])
-
-    rc = _run_phase_subprocess(cmd_report, sid, phase="report")
-    if rc != 0:
-        socketio.emit("process_done", {
-            "data": f"\nPipeline stopped: Phase 4 (Report) failed with exit code {rc}\n",
-            "success": False,
-        }, to=sid)
-        return
-
-    socketio.emit("process_done", {
-        "data": "\n" + "=" * 60 + "\n  All 4 phases completed successfully!\n" + "=" * 60 + "\n",
-        "success": True,
-    }, to=sid)
+    finally:
+        # Always clear _current_process when the pipeline exits (success,
+        # failure, or exception) so subsequent runs are not blocked.
+        with _process_lock:
+            _current_process = None
 
 
 @socketio.on("run_all")
@@ -560,15 +604,20 @@ def handle_run_all(data):
 
 
 @socketio.on("stop_process")
-def handle_stop():
-    """Stop the currently running process."""
-    global _current_process
-    with _process_lock:
-        if _current_process is not None and _current_process.poll() is None:
-            _current_process.terminate()
-            emit("console_output", {"data": "\nProcess terminated by user.\n"})
+def handle_stop(data=None):
+    """Stop a running process for a specific phase."""
+    phase = (data or {}).get("phase", "scan")
+    out_event = f"console_output_{phase}"
+    with _phase_lock:
+        proc = _phase_processes.get(phase)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            emit(out_event, {"data": "\nProcess terminated by user.\n"})
         else:
-            emit("console_output", {"data": "No process is currently running.\n"})
+            emit(
+                out_event,
+                {"data": f"No process is currently running for phase '{phase}'.\n"},
+            )
 
 
 if __name__ == "__main__":
