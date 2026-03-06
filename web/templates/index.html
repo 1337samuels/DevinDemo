@@ -923,23 +923,23 @@
                 <div class="pipeline-step" id="pipeline-step-3">Phase 4: Report</div>
             </div>
 
-            <!-- 2x2 per-phase console grid -->
+            <!-- 2x2 per-phase console grid (mirrors of individual phase consoles) -->
             <div class="dashboard-consoles">
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 1: Scan</h3></div>
-                    <div class="console-panel" id="console-scan"></div>
+                    <div class="console-panel" id="dash-console-scan"></div>
                 </div>
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 2: Validate</h3></div>
-                    <div class="console-panel" id="console-validate"></div>
+                    <div class="console-panel" id="dash-console-validate"></div>
                 </div>
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 3: Cleanup</h3></div>
-                    <div class="console-panel" id="console-cleanup"></div>
+                    <div class="console-panel" id="dash-console-cleanup"></div>
                 </div>
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 4: Report</h3></div>
-                    <div class="console-panel" id="console-report"></div>
+                    <div class="console-panel" id="dash-console-report"></div>
                 </div>
             </div>
         </div>
@@ -1423,7 +1423,7 @@
         }
         loadAllDropdowns();
 
-        // ----- Dashboard: move console panels in/out of the grid -----
+        // ----- Dashboard: sync console mirrors -----
 
         const PHASES = ['scan', 'validate', 'cleanup', 'report'];
         const PHASE_LABELS = {
@@ -1432,35 +1432,17 @@
             cleanup: "Phase 3: Cleanup PR's",
             report: 'Phase 4: Report'
         };
-        const dashboardGrid = document.getElementById('dashboard-grid');
 
-        // Original parent locations so we can move consoles back
-        const consoleHomeParent = {};
-        PHASES.forEach(function(p) {
-            const panel = document.getElementById('console-panel-' + p);
-            consoleHomeParent[p] = panel.parentElement;
-        });
-
-        function populateDashboard() {
+        // Sync existing content from phase consoles to their dashboard mirrors
+        function syncDashboardConsoles() {
             PHASES.forEach(function(p) {
-                const panel = document.getElementById('console-panel-' + p);
-                // Update header to show phase name in dashboard view
-                panel.querySelector('.console-header h3').innerHTML =
-                    '<span class="status-dot' +
-                    (phaseRunning[p] ? ' running' : '') +
-                    '" id="status-dot-' + p + '"></span> ' + PHASE_LABELS[p];
-                dashboardGrid.appendChild(panel);
+                const src = document.getElementById('console-' + p);
+                const mirror = document.getElementById('dash-console-' + p);
+                if (src && mirror) {
+                    mirror.innerHTML = src.innerHTML;
+                    mirror.scrollTop = mirror.scrollHeight;
+                }
             });
-        }
-
-        function restoreConsole(phase) {
-            const panel = document.getElementById('console-panel-' + phase);
-            // Restore simple "Console" header when inside its own phase tab
-            panel.querySelector('.console-header h3').innerHTML =
-                '<span class="status-dot' +
-                (phaseRunning[phase] ? ' running' : '') +
-                '" id="status-dot-' + phase + '"></span> Console';
-            consoleHomeParent[phase].appendChild(panel);
         }
 
         // ----- Secrets auto-fill -----
@@ -1496,10 +1478,7 @@
                 document.getElementById('panel-' + currentPhase).classList.add('active');
 
                 if (currentPhase === 'dashboard') {
-                    populateDashboard();
-                } else {
-                    // Move all consoles back to their home panels
-                    PHASES.forEach(restoreConsole);
+                    syncDashboardConsoles();
                 }
                 loadAllDropdowns();
             });
@@ -1507,29 +1486,32 @@
 
         // ----- Per-phase console output via SocketIO -----
 
+        // Helper: append a span to a console element
+        function appendToConsole(consoleEl, text, className) {
+            if (!consoleEl) return;
+            const span = document.createElement('span');
+            if (className) span.className = className;
+            span.textContent = text;
+            consoleEl.appendChild(span);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
         function setupPhaseConsole(phase) {
-            // Query DOM dynamically (elements move between phase panels and dashboard)
             socket.on('console_output_' + phase, (msg) => {
-                const consoleEl = document.getElementById('console-' + phase);
-                if (!consoleEl) return;
-                const span = document.createElement('span');
                 const text = msg.data;
-                if (text.startsWith('$')) {
-                    span.className = 'cmd';
-                }
-                span.textContent = text;
-                consoleEl.appendChild(span);
-                consoleEl.scrollTop = consoleEl.scrollHeight;
+                const cls = text.startsWith('$') ? 'cmd' : '';
+                // Write to phase console
+                appendToConsole(document.getElementById('console-' + phase), text, cls);
+                // Mirror to dashboard grid console
+                appendToConsole(document.getElementById('dash-console-' + phase), text, cls);
             });
 
             socket.on('process_done_' + phase, (msg) => {
-                const consoleEl = document.getElementById('console-' + phase);
-                if (!consoleEl) return;
-                const span = document.createElement('span');
-                span.className = msg.success ? 'success' : 'error';
-                span.textContent = msg.data;
-                consoleEl.appendChild(span);
-                consoleEl.scrollTop = consoleEl.scrollHeight;
+                const cls = msg.success ? 'success' : 'error';
+                // Write to phase console
+                appendToConsole(document.getElementById('console-' + phase), msg.data, cls);
+                // Mirror to dashboard grid console
+                appendToConsole(document.getElementById('dash-console-' + phase), msg.data, cls);
 
                 phaseRunning[phase] = false;
                 const statusDot = document.getElementById('status-dot-' + phase);
@@ -1549,14 +1531,10 @@
             const text = msg.data;
             const phase = msg.phase;
             if (phase && runAllActive) {
-                const dashPanel = document.getElementById('console-' + phase);
-                if (dashPanel) {
-                    const span = document.createElement('span');
-                    if (text.startsWith('$')) span.className = 'cmd';
-                    span.textContent = text;
-                    dashPanel.appendChild(span);
-                    dashPanel.scrollTop = dashPanel.scrollHeight;
-                }
+                const cls = text.startsWith('$') ? 'cmd' : '';
+                // Write to both the phase console and the dashboard mirror
+                appendToConsole(document.getElementById('console-' + phase), text, cls);
+                appendToConsole(document.getElementById('dash-console-' + phase), text, cls);
             }
         });
 
@@ -1776,15 +1754,19 @@
         function clearConsole(phase) {
             if (!phase) phase = currentPhase;
             if (phase === 'dashboard') {
-                // Clear all dashboard per-phase consoles
+                // Clear all phase consoles and their dashboard mirrors
                 ['scan', 'validate', 'cleanup', 'report'].forEach(p => {
                     const el = document.getElementById('console-' + p);
                     if (el) el.innerHTML = '';
+                    const mirror = document.getElementById('dash-console-' + p);
+                    if (mirror) mirror.innerHTML = '';
                 });
                 return;
             }
             const el = document.getElementById('console-' + phase);
             if (el) el.innerHTML = '';
+            const mirror = document.getElementById('dash-console-' + phase);
+            if (mirror) mirror.innerHTML = '';
             const dot = document.getElementById('status-dot-' + phase);
             if (dot && !phaseRunning[phase]) dot.className = 'status-dot';
         }
