@@ -80,13 +80,12 @@ class DebtReporter:
 
         # --- Slack ---
         if "slack" in targets:
-            self._notify_slack(
+            result["slack_summary_sent"] = self._notify_slack(
                 notion_database_id=result["notion_database_id"],
                 cleanup_results=cleanup_results,
                 candidates_processed=len(candidates),
                 repo=findings.get("repo"),
             )
-            result["slack_summary_sent"] = True
 
         # --- stdout ---
         if "stdout" in targets:
@@ -129,11 +128,14 @@ class DebtReporter:
         cleanup_results: list[dict[str, Any]] | None,
         candidates_processed: int,
         repo: str | None = None,
-    ) -> None:
-        """Send a single Slack summary with Notion link and PR URLs."""
+    ) -> bool:
+        """Send a single Slack summary with Notion link and PR URLs.
+
+        Returns ``True`` only when the message is actually delivered.
+        """
         if not self._slack_webhook_url:
             print("[reporter] Slack webhook not configured; skipping.")
-            return
+            return False
 
         notifier = SlackNotifier(self._slack_webhook_url)
         try:
@@ -143,8 +145,10 @@ class DebtReporter:
                 candidates_processed=candidates_processed,
                 repo=repo,
             )
+            return True
         except SlackNotifyError as exc:
             print(f"[reporter] WARNING: Slack notification failed: {exc}")
+            return False
 
     @staticmethod
     def _print_stdout(
