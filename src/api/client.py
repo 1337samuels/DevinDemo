@@ -237,6 +237,7 @@ class DevinAPIClient:
         timeout: int = 600,
         on_update: Any | None = None,
         expect_running_first: bool = False,
+        on_waiting_for_user: Any | None = None,
     ) -> dict[str, Any]:
         """Poll a session until it reaches a terminal or idle status.
 
@@ -262,6 +263,15 @@ class DevinAPIClient:
                 apply.  This prevents the poller from returning
                 immediately on the *old* ``waiting_for_user`` status
                 after ``send_message()``.
+            on_waiting_for_user: Optional callback
+                ``(client, session_dict) -> bool`` called when the session
+                enters ``waiting_for_user`` **without** structured output.
+                The callback can send a follow-up message via
+                ``client.send_message()`` and should return ``True`` to
+                keep polling or ``False`` to return immediately.
+                If not provided, waiting-for-user with structured output
+                returns the session; without structured output it keeps
+                polling until timeout.
 
         Returns:
             The final session dict once a terminal status is reached.
@@ -294,17 +304,23 @@ class DevinAPIClient:
             if status == "running" and status_detail == "finished":
                 return session
 
-            # The session is waiting for a follow-up message.  In the
-            # single-session multi-prompt flow, this means Devin finished
-            # processing the current prompt and is ready for the next one.
-            # Only return here if we've already seen a non-waiting state
-            # (i.e. the session processed the message we just sent).
-            if (
-                status == "running"
-                and status_detail == "waiting_for_user"
-                and saw_running
-            ):
-                return session
+            # Handle waiting_for_user
+            if status == "running" and status_detail == "waiting_for_user":
+                # If structured output exists, we have what we need.
+                if session.get("structured_output") is not None:
+                    return session
+
+                # Only act on waiting_for_user if we've seen a non-waiting
+                # state first (to avoid returning on stale status after
+                # send_message).
+                if saw_running:
+                    # If a callback was provided, let it decide what to do.
+                    if on_waiting_for_user is not None:
+                        keep_polling = on_waiting_for_user(self, session)
+                        if not keep_polling:
+                            return session
+                    else:
+                        return session
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(
