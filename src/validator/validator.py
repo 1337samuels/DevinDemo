@@ -948,7 +948,6 @@ def _status_from_confidence(confidence: str) -> str:
 
 
 def build_summary_report(
-    findings: dict[str, Any],
     validation_map: dict[str, dict[str, Any]],
     all_patterns: list[str],
 ) -> dict[str, Any]:
@@ -1001,14 +1000,13 @@ def build_summary_report(
         "exempt": exempt_candidates,
         "patterns_observed": all_patterns,
         "recommendations": _generate_recommendations(
-            counts, high_candidates, all_patterns
+            counts, all_patterns
         ),
     }
 
 
 def _generate_recommendations(
     counts: dict[str, int],
-    high_candidates: list[dict[str, Any]],
     patterns: list[str],
 ) -> list[str]:
     """Generate human-readable recommendations for the team."""
@@ -1098,9 +1096,7 @@ class LegacyCodeValidator:
 
         if total_batches == 0:
             print("[validator] No candidates to validate.")
-            findings["validation_report"] = build_summary_report(
-                findings, {}, []
-            )
+            findings["validation_report"] = build_summary_report({}, [])
             return findings
 
         print(
@@ -1186,7 +1182,7 @@ class LegacyCodeValidator:
         _merge_validation_into_findings(findings, validation_map)
 
         # Build aggregate report
-        report = build_summary_report(findings, validation_map, all_patterns)
+        report = build_summary_report(validation_map, all_patterns)
         findings["validation_report"] = report
 
         # Print summary
