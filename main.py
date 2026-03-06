@@ -15,6 +15,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.api.client import DevinAPIClient, DevinAPIError
 from src.reporter.reporter import DebtReporter
@@ -293,21 +294,90 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"View in Notion: https://www.notion.so/{clean_id}")
 
 
+# ---------------------------------------------------------------------------
+# secrets.txt loader
+# ---------------------------------------------------------------------------
+
+_SECRETS_FILE = "secrets.txt"
+
+# Maps secrets.txt key -> (argparse dest, applicable commands)
+_SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
+    "API_V3_KEY": ("api_key", {"scan", "validate", "cleanup"}),
+    "API_V1_KEY": ("v1_api_key", {"scan", "validate", "cleanup"}),
+    "ORG_ID": ("org_id", {"scan", "validate", "cleanup"}),
+    "NOTION_SECRET": ("notion_api_key", {"report"}),
+    "NOTION_MASTER_PAGE_ID": ("notion_parent_page_id", {"report"}),
+}
+
+
+def _load_secrets(path: str = _SECRETS_FILE) -> dict[str, str]:
+    """Parse a ``secrets.txt`` file and return a ``{KEY: value}`` dict.
+
+    Each line is expected to be ``KEY = "value"`` (or ``KEY = value``).
+    Blank lines and lines without ``=`` are silently skipped.
+    """
+    secrets: dict[str, str] = {}
+    p = Path(path)
+    if not p.is_file():
+        return secrets
+
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and value:
+            secrets[key] = value
+
+    return secrets
+
+
+def _apply_secrets(args: argparse.Namespace) -> None:
+    """Fill missing CLI arguments from ``secrets.txt`` if available."""
+    secrets = _load_secrets()
+    if not secrets:
+        return
+
+    command = getattr(args, "command", None)
+    if not command:
+        return
+
+    applied: list[str] = []
+    for secret_key, (dest, commands) in _SECRETS_MAP.items():
+        if command not in commands:
+            continue
+        if secret_key not in secrets:
+            continue
+        current = getattr(args, dest, None)
+        if current is None:
+            setattr(args, dest, secrets[secret_key])
+            applied.append(f"{secret_key} -> --{dest.replace('_', '-')}")
+
+    if applied:
+        print(f"[secrets] Loaded from {_SECRETS_FILE}: {', '.join(applied)}")
+
+
 def _add_devin_api_args(parser: argparse.ArgumentParser) -> None:
-    """Add --api-key and --org-id arguments to a subparser (phases 1-3)."""
+    """Add --api-key and --org-id arguments to a subparser (phases 1-3).
+
+    These are not marked ``required`` because they can be auto-filled from
+    ``secrets.txt``.  A post-parse check in ``main()`` ensures they are set.
+    """
     parser.add_argument(
         "--api-key",
-        required=True,
+        default=None,
         help="Devin service user API key (starts with cog_) for the v3 API.",
     )
     parser.add_argument(
         "--v1-api-key",
-        required=True,
+        default=None,
         help="Devin legacy API key (starts with apk_) for v1 send_message.",
     )
     parser.add_argument(
         "--org-id",
-        required=True,
+        default=None,
         help="Devin organization ID (starts with org-).",
     )
 
@@ -458,9 +528,32 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Required Devin API args per phase (validated after secrets are applied)
+_REQUIRED_DEVIN_ARGS = {"scan", "validate", "cleanup"}
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    # Auto-fill from secrets.txt before validation
+    _apply_secrets(args)
+
+    # Enforce required Devin API credentials for phases 1-3
+    if args.command in _REQUIRED_DEVIN_ARGS:
+        missing = []
+        if not args.api_key:
+            missing.append("--api-key")
+        if not args.v1_api_key:
+            missing.append("--v1-api-key")
+        if not args.org_id:
+            missing.append("--org-id")
+        if missing:
+            parser.error(
+                f"{', '.join(missing)} required for '{args.command}'. "
+                f"Provide via CLI flags or create a {_SECRETS_FILE} file."
+            )
+
     args.func(args)
 
 
