@@ -742,22 +742,38 @@
 
         <!-- Dashboard mode -->
         <div class="mode-panel active" id="mode-dashboard">
-            <div class="dashboard-file-selector">
-                <label>Result File</label>
-                <select id="dashboard-file-select">
-                    <option value="">Loading...</option>
-                </select>
+            <div class="dashboard-file-selector" style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
+                <div>
+                    <label>Repository</label>
+                    <select id="dashboard-repo-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Result File</label>
+                    <select id="dashboard-file-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
             </div>
             <div id="dashboard-content">
                 <div class="dashboard-empty">
                     <h3>No data loaded</h3>
-                    <p>Select a validate result file above, or run a validation first.</p>
+                    <p>Select a repository and result file above, or run a validation first.</p>
                 </div>
             </div>
         </div>
 
         <!-- CNC mode -->
         <div class="mode-panel" id="mode-cnc">
+
+        <!-- CNC Repo filter -->
+        <div class="dashboard-file-selector" style="margin-bottom:1rem;">
+            <label>Repository Filter</label>
+            <select id="cnc-repo-select">
+                <option value="">All repositories</option>
+            </select>
+        </div>
 
         <!-- Phase tabs -->
         <div class="tabs">
@@ -1159,7 +1175,7 @@
 
         // ----- File dropdown management -----
 
-        async function loadFileDropdown(selectId) {
+        async function loadFileDropdown(selectId, repoFilter) {
             const select = document.getElementById(selectId);
             if (!select) return;
             const fileType = select.dataset.fileType;
@@ -1167,7 +1183,11 @@
             const prevValue = select.value;
             select.innerHTML = '<option value="">Loading...</option>';
             try {
-                const resp = await fetch('/api/results/' + fileType);
+                let url = '/api/results/' + fileType;
+                if (repoFilter) {
+                    url += '?repo=' + encodeURIComponent(repoFilter);
+                }
+                const resp = await fetch(url);
                 const files = await resp.json();
                 select.innerHTML = '';
                 if (files.length === 0) {
@@ -1234,9 +1254,15 @@
             sel.addEventListener('change', function() { onFileDropdownChange(sel.id); });
         });
 
+        function getCncRepoFilter() {
+            const sel = document.getElementById('cnc-repo-select');
+            return sel ? sel.value : '';
+        }
+
         function loadAllDropdowns() {
+            const repoFilter = getCncRepoFilter();
             document.querySelectorAll('.file-dropdown').forEach(function(sel) {
-                loadFileDropdown(sel.id);
+                loadFileDropdown(sel.id, repoFilter);
             });
         }
         loadAllDropdowns();
@@ -1508,6 +1534,45 @@
             if (dot && !phaseRunning[phase]) dot.className = 'status-dot';
         }
 
+        // ===== REPO SELECTOR =====
+
+        async function loadRepoSelector(selectId, opts) {
+            opts = opts || {};
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            const prevValue = select.value;
+            const emptyLabel = opts.emptyLabel || 'All repositories';
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const resp = await fetch('/api/repos');
+                const repos = await resp.json();
+                select.innerHTML = '';
+                const allOpt = document.createElement('option');
+                allOpt.value = '';
+                allOpt.textContent = emptyLabel;
+                select.appendChild(allOpt);
+                repos.forEach(function(r) {
+                    const opt = document.createElement('option');
+                    opt.value = r;
+                    opt.textContent = r;
+                    select.appendChild(opt);
+                });
+                if (prevValue && Array.from(select.options).some(function(o) { return o.value === prevValue; })) {
+                    select.value = prevValue;
+                } else if (repos.length === 1) {
+                    // Auto-select if only one repo
+                    select.value = repos[0];
+                }
+            } catch (err) {
+                select.innerHTML = '<option value="">Error loading repos</option>';
+            }
+        }
+
+        // CNC repo filter: reload file dropdowns when repo changes
+        document.getElementById('cnc-repo-select').addEventListener('change', function() {
+            loadAllDropdowns();
+        });
+
         // ===== MODE SWITCHING (Dashboard / CNC) =====
 
         let currentMode = 'dashboard';
@@ -1520,7 +1585,10 @@
                 currentMode = tab.dataset.mode;
                 document.getElementById('mode-' + currentMode).classList.add('active');
                 if (currentMode === 'dashboard') {
-                    loadDashboardFileSelect();
+                    loadDashboardRepoSelect();
+                } else if (currentMode === 'cnc') {
+                    loadRepoSelector('cnc-repo-select', {emptyLabel: 'All repositories'});
+                    loadAllDropdowns();
                 }
             });
         });
@@ -1530,19 +1598,33 @@
         let typeChart = null;
         let confidenceChart = null;
 
+        async function loadDashboardRepoSelect() {
+            await loadRepoSelector('dashboard-repo-select', {emptyLabel: 'Select a repository\u2026'});
+            // After loading repos, load the file select for the selected repo
+            loadDashboardFileSelect();
+        }
+
         async function loadDashboardFileSelect() {
+            const repoSelect = document.getElementById('dashboard-repo-select');
             const select = document.getElementById('dashboard-file-select');
             if (!select) return;
+            const repoFilter = repoSelect ? repoSelect.value : '';
             const prevValue = select.value;
             select.innerHTML = '<option value="">Loading...</option>';
             try {
-                const resp = await fetch('/api/results/validate');
+                let url = '/api/results/validate';
+                if (repoFilter) {
+                    url += '?repo=' + encodeURIComponent(repoFilter);
+                }
+                const resp = await fetch(url);
                 const files = await resp.json();
                 select.innerHTML = '';
                 if (files.length === 0) {
                     const empty = document.createElement('option');
                     empty.value = '';
-                    empty.textContent = 'No validate results found — run a validation first';
+                    empty.textContent = repoFilter
+                        ? 'No validate results for this repo'
+                        : 'No validate results found — run a validation first';
                     select.appendChild(empty);
                 } else {
                     files.forEach(function(f, idx) {
@@ -1568,6 +1650,10 @@
             }
         }
 
+        document.getElementById('dashboard-repo-select').addEventListener('change', function() {
+            loadDashboardFileSelect();
+        });
+
         document.getElementById('dashboard-file-select').addEventListener('change', function() {
             if (this.value) {
                 loadDashboardData(this.value);
@@ -1584,7 +1670,13 @@
             container.innerHTML = '<div class="dashboard-empty"><p>Loading dashboard data...</p></div>';
 
             try {
-                const resp = await fetch('/api/dashboard-data?file=' + encodeURIComponent(filePath));
+                const repoSelect = document.getElementById('dashboard-repo-select');
+                const repoFilter = repoSelect ? repoSelect.value : '';
+                let url = '/api/dashboard-data?file=' + encodeURIComponent(filePath);
+                if (repoFilter) {
+                    url += '&repo=' + encodeURIComponent(repoFilter);
+                }
+                const resp = await fetch(url);
                 if (!resp.ok) {
                     const err = await resp.json();
                     container.innerHTML = '<div class="dashboard-empty"><h3>Error</h3><p>' + (err.error || 'Unknown error') + '</p></div>';
@@ -1756,7 +1848,9 @@
         }
 
         // Load dashboard data on page load
-        loadDashboardFileSelect();
+        loadDashboardRepoSelect();
+        // Also pre-load CNC repo selector
+        loadRepoSelector('cnc-repo-select', {emptyLabel: 'All repositories'});
     </script>
 </body>
 </html>
