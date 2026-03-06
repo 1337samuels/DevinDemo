@@ -92,8 +92,35 @@ class DevinAPIClient:
         return self._request("POST", "/sessions", json=body)
 
     def get_session(self, session_id: str) -> dict[str, Any]:
-        """Retrieve the current state of a session."""
-        return self._request("GET", f"/sessions/{session_id}")
+        """Retrieve the current state of a session.
+
+        Tries the dedicated GET endpoint first.  If the service user
+        lacks ``ViewOrgSessions`` permission (403), it falls back to
+        the LIST endpoint which only requires ``ManageOrgSessions``.
+        """
+        try:
+            return self._request("GET", f"/sessions/{session_id}")
+        except DevinAPIError as exc:
+            if exc.status_code != 403:
+                raise
+        # Fallback: search for the session in the paginated list.
+        return self._find_session_via_list(session_id)
+
+    def _find_session_via_list(self, session_id: str) -> dict[str, Any]:
+        """Locate a session by iterating the LIST endpoint."""
+        cursor: str | None = None
+        while True:
+            params: dict[str, str | int] = {"first": 200}
+            if cursor is not None:
+                params["after"] = cursor
+            data = self._request("GET", "/sessions", params=params)
+            for item in data.get("items", []):
+                if item.get("session_id") == session_id:
+                    return item
+            if not data.get("has_next_page"):
+                break
+            cursor = data.get("end_cursor")
+        raise DevinAPIError(404, f"Session {session_id} not found via list endpoint.")
 
     def send_message(self, session_id: str, message: str) -> dict[str, Any]:
         """Send a follow-up message to a running session."""
