@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DevinDemo Pipeline</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -318,6 +319,268 @@
             color: var(--yellow);
         }
 
+        /* Top-level mode tabs */
+        .mode-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .mode-tab {
+            padding: 0.5rem 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text-muted);
+            font-size: 0.9375rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+
+        .mode-tab:hover {
+            color: var(--text);
+            border-color: var(--accent);
+        }
+
+        .mode-tab.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .mode-panel { display: none; }
+        .mode-panel.active { display: block; }
+
+        /* Dashboard styles */
+        .dashboard-file-selector {
+            margin-bottom: 1.5rem;
+        }
+
+        .dashboard-file-selector select {
+            padding: 0.5rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text);
+            font-size: 0.875rem;
+            font-family: inherit;
+            min-width: 400px;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b8fa3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            padding-right: 2rem;
+            cursor: pointer;
+        }
+
+        .dashboard-file-selector select option {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .dashboard-file-selector label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: block;
+            margin-bottom: 0.375rem;
+        }
+
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            text-align: center;
+        }
+
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1;
+        }
+
+        .stat-card .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.5rem;
+        }
+
+        .stat-card.high .stat-value { color: var(--green); }
+        .stat-card.medium .stat-value { color: var(--yellow); }
+        .stat-card.low .stat-value { color: var(--red); }
+
+        .dashboard-charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .chart-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+        }
+
+        .chart-card h3 {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .chart-canvas-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 280px;
+            margin: 0 auto;
+        }
+
+        .dashboard-pr-links {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+        }
+
+        .dashboard-pr-links h3 {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .pr-link-list {
+            list-style: none;
+        }
+
+        .pr-link-list li {
+            padding: 0.625rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .pr-link-list li:last-child {
+            border-bottom: none;
+        }
+
+        .pr-link-list a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.875rem;
+        }
+
+        .pr-link-list a:hover {
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
+
+        .pr-link-file {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+
+        .dashboard-empty {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .dashboard-empty h3 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: var(--text);
+        }
+
+        .dashboard-candidates {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            margin-top: 1.5rem;
+        }
+
+        .dashboard-candidates h3 {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .candidates-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+
+        .candidates-table th {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 2px solid var(--border);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.6875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .candidates-table td {
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        .candidates-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.125rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-high { background: rgba(34,197,94,0.15); color: var(--green); }
+        .badge-medium { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .badge-low { background: rgba(239,68,68,0.15); color: var(--red); }
+        .badge-exempt { background: rgba(139,143,163,0.15); color: var(--text-muted); }
+        .badge-unknown { background: rgba(139,143,163,0.15); color: var(--text-muted); }
+
+        .badge-feature_flag { background: rgba(96,165,250,0.15); color: #60a5fa; }
+        .badge-dead_code { background: rgba(239,68,68,0.15); color: var(--red); }
+        .badge-tech_debt { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .badge-unused_import { background: rgba(168,130,220,0.15); color: #a882dc; }
+        .badge-boolean_config_variable { background: rgba(96,165,250,0.15); color: #60a5fa; }
+
         /* Layer checkboxes */
         .layer-checkboxes {
             display: grid;
@@ -442,6 +705,31 @@
             <h1>DevinDemo Pipeline</h1>
             <p>Feature-flag & tech-debt scanner powered by Devin API</p>
         </header>
+
+        <!-- Top-level mode tabs -->
+        <div class="mode-tabs">
+            <button class="mode-tab active" data-mode="dashboard">Dashboard</button>
+            <button class="mode-tab" data-mode="cnc">CNC</button>
+        </div>
+
+        <!-- Dashboard mode -->
+        <div class="mode-panel active" id="mode-dashboard">
+            <div class="dashboard-file-selector">
+                <label>Result File</label>
+                <select id="dashboard-file-select">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+            <div id="dashboard-content">
+                <div class="dashboard-empty">
+                    <h3>No data loaded</h3>
+                    <p>Select a validate result file above, or run a validation first.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- CNC mode -->
+        <div class="mode-panel" id="mode-cnc">
 
         <!-- Phase tabs -->
         <div class="tabs">
@@ -720,6 +1008,8 @@
             </div>
             <div id="console"></div>
         </div>
+
+        </div><!-- end mode-cnc -->
     </div>
 
     <script>
@@ -1081,6 +1371,256 @@
             consoleEl.innerHTML = '';
             statusDot.className = 'status-dot';
         }
+
+        // ===== MODE SWITCHING (Dashboard / CNC) =====
+
+        let currentMode = 'dashboard';
+
+        document.querySelectorAll('.mode-tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.mode-tab').forEach(function(t) { t.classList.remove('active'); });
+                document.querySelectorAll('.mode-panel').forEach(function(p) { p.classList.remove('active'); });
+                tab.classList.add('active');
+                currentMode = tab.dataset.mode;
+                document.getElementById('mode-' + currentMode).classList.add('active');
+                if (currentMode === 'dashboard') {
+                    loadDashboardFileSelect();
+                }
+            });
+        });
+
+        // ===== DASHBOARD =====
+
+        let typeChart = null;
+        let confidenceChart = null;
+
+        async function loadDashboardFileSelect() {
+            const select = document.getElementById('dashboard-file-select');
+            if (!select) return;
+            const prevValue = select.value;
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const resp = await fetch('/api/results/validate');
+                const files = await resp.json();
+                select.innerHTML = '';
+                if (files.length === 0) {
+                    const empty = document.createElement('option');
+                    empty.value = '';
+                    empty.textContent = 'No validate results found — run a validation first';
+                    select.appendChild(empty);
+                } else {
+                    files.forEach(function(f, idx) {
+                        const opt = document.createElement('option');
+                        opt.value = f.path;
+                        opt.textContent = f.label;
+                        select.appendChild(opt);
+                    });
+                    // Auto-select first (most recent) if nothing was selected
+                    if (prevValue && Array.from(select.options).some(function(o) { return o.value === prevValue; })) {
+                        select.value = prevValue;
+                    } else {
+                        select.value = files[0].path;
+                    }
+                    loadDashboardData(select.value);
+                }
+            } catch (err) {
+                select.innerHTML = '';
+                const errOpt = document.createElement('option');
+                errOpt.value = '';
+                errOpt.textContent = 'Error loading files';
+                select.appendChild(errOpt);
+            }
+        }
+
+        document.getElementById('dashboard-file-select').addEventListener('change', function() {
+            if (this.value) {
+                loadDashboardData(this.value);
+            }
+        });
+
+        async function loadDashboardData(filePath) {
+            const container = document.getElementById('dashboard-content');
+            if (!filePath) {
+                container.innerHTML = '<div class="dashboard-empty"><h3>No data loaded</h3><p>Select a validate result file above.</p></div>';
+                return;
+            }
+
+            container.innerHTML = '<div class="dashboard-empty"><p>Loading dashboard data...</p></div>';
+
+            try {
+                const resp = await fetch('/api/dashboard-data?file=' + encodeURIComponent(filePath));
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    container.innerHTML = '<div class="dashboard-empty"><h3>Error</h3><p>' + (err.error || 'Unknown error') + '</p></div>';
+                    return;
+                }
+                const data = await resp.json();
+                renderDashboard(data);
+            } catch (err) {
+                container.innerHTML = '<div class="dashboard-empty"><h3>Error</h3><p>' + err.message + '</p></div>';
+            }
+        }
+
+        function renderDashboard(data) {
+            const container = document.getElementById('dashboard-content');
+
+            // Count by confidence
+            const highCount = data.by_confidence['HIGH'] || 0;
+            const medCount = data.by_confidence['MEDIUM'] || 0;
+            const lowCount = data.by_confidence['LOW'] || 0;
+            const exemptCount = data.by_confidence['EXEMPT'] || 0;
+
+            let html = '';
+
+            // Repo header
+            html += '<div style="margin-bottom:1rem;color:var(--text-muted);font-size:0.8125rem;">';
+            html += 'Repository: <strong style="color:var(--text);">' + escapeHtml(data.repo) + '</strong>';
+            html += ' &mdash; ' + escapeHtml(data.file);
+            html += '</div>';
+
+            // Summary stat cards
+            html += '<div class="dashboard-stats">';
+            html += '<div class="stat-card"><div class="stat-value">' + data.total_candidates + '</div><div class="stat-label">Total Candidates</div></div>';
+            html += '<div class="stat-card high"><div class="stat-value">' + highCount + '</div><div class="stat-label">High Confidence</div></div>';
+            html += '<div class="stat-card medium"><div class="stat-value">' + medCount + '</div><div class="stat-label">Medium Confidence</div></div>';
+            html += '<div class="stat-card low"><div class="stat-value">' + (lowCount + exemptCount) + '</div><div class="stat-label">Low / Exempt</div></div>';
+            html += '</div>';
+
+            // Charts
+            html += '<div class="dashboard-charts">';
+            html += '<div class="chart-card"><h3>Issues by Type</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-type"></canvas></div></div>';
+            html += '<div class="chart-card"><h3>Issues by Confidence</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-confidence"></canvas></div></div>';
+            html += '</div>';
+
+            // PR Links
+            html += '<div class="dashboard-pr-links"><h3>Opened PRs</h3>';
+            if (data.pr_links.length > 0) {
+                html += '<ul class="pr-link-list">';
+                data.pr_links.forEach(function(pr) {
+                    html += '<li>';
+                    html += '<a href="' + escapeHtml(pr.url) + '" target="_blank">' + escapeHtml(pr.url) + '</a>';
+                    html += '<span class="pr-link-file">' + escapeHtml(pr.file) + '</span>';
+                    html += '</li>';
+                });
+                html += '</ul>';
+            } else {
+                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No PRs have been opened yet. Run Phase 3 (Cleanup) to generate removal PRs.</p>';
+            }
+            html += '</div>';
+
+            // Candidates table
+            html += '<div class="dashboard-candidates"><h3>All Candidates</h3>';
+            html += '<table class="candidates-table">';
+            html += '<thead><tr><th>ID</th><th>Category</th><th>File</th><th>Line</th><th>Confidence</th></tr></thead>';
+            html += '<tbody>';
+            data.candidates.forEach(function(c) {
+                const confClass = c.confidence.toLowerCase();
+                const catClass = c.category.toLowerCase();
+                html += '<tr>';
+                html += '<td style="font-family:monospace;font-size:0.75rem;">' + escapeHtml(c.id.substring(0, 10)) + '</td>';
+                html += '<td><span class="badge badge-' + catClass + '">' + escapeHtml(c.category) + '</span></td>';
+                html += '<td style="font-family:monospace;font-size:0.75rem;">' + escapeHtml(c.file) + '</td>';
+                html += '<td>' + c.line + '</td>';
+                html += '<td><span class="badge badge-' + confClass + '">' + escapeHtml(c.confidence) + '</span></td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+
+            container.innerHTML = html;
+
+            // Render charts
+            renderTypeChart(data.by_type);
+            renderConfidenceChart(data.by_confidence);
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str || '';
+            return div.innerHTML;
+        }
+
+        const TYPE_COLORS = {
+            'feature_flag': '#60a5fa',
+            'dead_code': '#ef4444',
+            'tech_debt': '#eab308',
+            'unused_import': '#a882dc',
+            'boolean_config_variable': '#60a5fa',
+        };
+
+        const CONFIDENCE_COLORS = {
+            'HIGH': '#22c55e',
+            'MEDIUM': '#eab308',
+            'LOW': '#ef4444',
+            'EXEMPT': '#6b7280',
+            'UNKNOWN': '#4b5563',
+        };
+
+        function renderTypeChart(byType) {
+            const canvas = document.getElementById('chart-by-type');
+            if (!canvas) return;
+            if (typeChart) { typeChart.destroy(); }
+
+            const labels = Object.keys(byType);
+            const values = Object.values(byType);
+            const colors = labels.map(function(l) { return TYPE_COLORS[l] || '#6b7280'; });
+
+            typeChart = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: colors,
+                        borderColor: '#1a1d27',
+                        borderWidth: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#8b8fa3', font: { size: 11 }, padding: 12 }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderConfidenceChart(byConfidence) {
+            const canvas = document.getElementById('chart-by-confidence');
+            if (!canvas) return;
+            if (confidenceChart) { confidenceChart.destroy(); }
+
+            const labels = Object.keys(byConfidence);
+            const values = Object.values(byConfidence);
+            const colors = labels.map(function(l) { return CONFIDENCE_COLORS[l] || '#6b7280'; });
+
+            confidenceChart = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: colors,
+                        borderColor: '#1a1d27',
+                        borderWidth: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#8b8fa3', font: { size: 11 }, padding: 12 }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load dashboard data on page load
+        loadDashboardFileSelect();
     </script>
 </body>
 </html>

@@ -142,6 +142,94 @@ def api_results(prefix: str):
     return jsonify(_discover_result_files(prefix))
 
 
+@app.route("/api/dashboard-data")
+def api_dashboard_data():
+    """Return aggregated dashboard data from the most recent validate result.
+
+    Query params:
+        file: optional path to a specific result file (relative to PROJECT_ROOT).
+              If omitted, the most recent validate result is used.
+    """
+    from flask import request as flask_request
+
+    file_path = flask_request.args.get("file", "").strip()
+
+    if not file_path:
+        # Pick the most recent validate result
+        results = _discover_result_files("validate")
+        if not results:
+            return jsonify({"error": "No validate results found"}), 404
+        file_path = results[0]["path"]
+
+    abs_path = os.path.join(PROJECT_ROOT, file_path)
+    if not os.path.isfile(abs_path):
+        return jsonify({"error": f"File not found: {file_path}"}), 404
+
+    try:
+        with open(abs_path, "r") as fh:
+            data = json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        return jsonify({"error": f"Failed to read file: {exc}"}), 500
+
+    # Aggregate candidates from all category lists
+    candidates: list[dict] = []
+    category_map = {
+        "feature_flags": "feature_flag",
+        "dead_code": "dead_code",
+        "tech_debt": "tech_debt",
+    }
+    for key, cat_label in category_map.items():
+        for item in data.get(key, []):
+            entry = {
+                "id": item.get("id", ""),
+                "category": item.get("category", cat_label),
+                "file": item.get("file", ""),
+                "line": item.get("line", 0),
+                "confidence": "UNKNOWN",
+                "pr_url": None,
+                "pr_opened": False,
+                "summary": "",
+            }
+            validation = item.get("validation", {})
+            if validation:
+                entry["confidence"] = validation.get("confidence", "UNKNOWN")
+                entry["summary"] = validation.get("summary", "")
+                entry["pr_url"] = validation.get("pr_url")
+                entry["pr_opened"] = validation.get("pr_opened", False)
+                if not entry["pr_url"]:
+                    entry["pr_url"] = validation.get("suggested_pr_title")
+            candidates.append(entry)
+
+    # Build aggregations
+    by_type: dict[str, int] = {}
+    by_confidence: dict[str, int] = {}
+    pr_links: list[dict] = []
+
+    for c in candidates:
+        cat = c["category"]
+        by_type[cat] = by_type.get(cat, 0) + 1
+
+        conf = c["confidence"]
+        by_confidence[conf] = by_confidence.get(conf, 0) + 1
+
+        if c.get("pr_url") and c["pr_url"].startswith("http"):
+            pr_links.append({
+                "candidate_id": c["id"],
+                "file": c["file"],
+                "url": c["pr_url"],
+            })
+
+    return jsonify({
+        "file": file_path,
+        "repo": data.get("repo", "unknown"),
+        "total_candidates": len(candidates),
+        "by_type": by_type,
+        "by_confidence": by_confidence,
+        "pr_links": pr_links,
+        "candidates": candidates,
+    })
+
+
 # Keys/secrets that should be masked in console output
 _SECRET_FLAGS = {
     "--api-key", "--v1-api-key", "--notion-api-key", "--slack-webhook-url",
