@@ -283,11 +283,14 @@ def cmd_report(args: argparse.Namespace) -> None:
             json.dump(result, fh, indent=2)
         print(f"\nReport metadata written to {args.output}")
 
-    # Print the Notion database ID if one was created/used
+    # Print the Notion database ID and link if one was created/used
     db_id = result.get("notion_database_id")
     if db_id:
         print(f"\nNotion database ID: {db_id}")
         print("Save this ID for future runs with --notion-database-id.")
+        # Notion URLs use the ID without dashes
+        clean_id = db_id.replace("-", "")
+        print(f"View in Notion: https://www.notion.so/{clean_id}")
 
 
 def _add_devin_api_args(parser: argparse.ArgumentParser) -> None:
