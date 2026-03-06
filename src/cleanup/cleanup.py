@@ -400,9 +400,70 @@ class CleanupPRGenerator:
                 _total: int = total,
                 _sid: str = session_id,
             ) -> bool:
-                """Handle waiting_for_user by sending a nudge."""
+                """Handle waiting_for_user by reading messages first.
+
+                When the session enters ``waiting_for_user``, Devin may
+                have already finished (e.g. opened a PR and reported the
+                URL).  We read the conversation to decide whether to
+                stop polling (Devin is done) or nudge (Devin stalled).
+                """
                 print(
                     f"[cleanup]   Session waiting for input --- "
+                    f"reading messages for finding {_idx}/{_total} ..."
+                )
+
+                # Fetch the full conversation via the v1 API
+                v1_session = client.get_session_v1(_sid)
+                messages = v1_session.get("messages") or []
+
+                # Walk backwards through Devin's messages to see if
+                # work is already done (PR URL present) or if Devin
+                # reported that it cannot create the PR.
+                for msg in reversed(messages):
+                    if msg.get("type") != "devin_message":
+                        continue
+                    text = msg.get("message", "")
+
+                    # Check for a PR URL in the message
+                    parsed = _extract_json_block(text)
+                    if parsed and parsed.get("pr_url"):
+                        print(
+                            f"[cleanup]   Found PR URL in message "
+                            f"--- done for finding {_idx}/{_total}."
+                        )
+                        return False  # Stop polling
+
+                    url = _extract_pr_url_from_text(text)
+                    if url:
+                        print(
+                            f"[cleanup]   Found PR URL in message "
+                            f"--- done for finding {_idx}/{_total}."
+                        )
+                        return False  # Stop polling
+
+                    # If Devin explicitly says it can't create the PR,
+                    # stop polling so we don't loop forever.
+                    _DONE_PHRASES = [
+                        "cannot safely remove",
+                        "unable to create",
+                        "could not create",
+                        "pr url: ",
+                        "empty pr url",
+                    ]
+                    lower = text.lower()
+                    if any(phrase in lower for phrase in _DONE_PHRASES):
+                        print(
+                            f"[cleanup]   Devin indicated completion "
+                            f"--- done for finding {_idx}/{_total}."
+                        )
+                        return False  # Stop polling
+
+                    # Only inspect the most recent Devin message
+                    break
+
+                # No completion signal found --- nudge Devin
+                print(
+                    f"[cleanup]   No completion signal found --- "
                     f"sending nudge for finding {_idx}/{_total} ..."
                 )
                 client.send_message(_sid, _NUDGE_MESSAGE)
