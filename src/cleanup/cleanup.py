@@ -85,7 +85,7 @@ merge the PR --- only open it.
    - A description explaining what was removed and why, referencing the \
      validation evidence
    - Make sure the code compiles/passes basic syntax checks after removal
-5. Do NOT merge the PR. Only open it.
+5. {merge_instruction}
 6. Report back the PR URL.
 
 If you cannot safely remove the code (e.g., it would break other \
@@ -153,6 +153,23 @@ def _extract_pr_url_from_text(text: str) -> str:
         if match:
             return match.group(0)
     return ""
+
+
+def _all_layers_passed(validation: dict[str, Any]) -> bool:
+    """Check if all validation layers passed for this finding.
+
+    Looks at the ``layers`` dict inside validation and returns ``True``
+    only if every layer has a truthy ``confirmed`` / boolean value.
+    If no layers data is present, returns ``False``.
+    """
+    layers = validation.get("layers", {})
+    if not layers:
+        return False
+    return all(
+        bool(layer_data) if not isinstance(layer_data, dict)
+        else layer_data.get("confirmed", False)
+        for layer_data in layers.values()
+    )
 
 
 def _extract_high_confidence_findings(
@@ -241,6 +258,7 @@ class CleanupPRGenerator:
         progress_tracker_factory: (
             Callable[..., Callable[[dict[str, Any]], None]] | None
         ) = None,
+        auto_merge: bool = False,
     ) -> list[dict[str, Any]]:
         """Create cleanup PRs for all HIGH-confidence findings.
 
@@ -331,6 +349,17 @@ class CleanupPRGenerator:
                 f"at {file_path}:{line} ---"
             )
 
+            # Determine merge instruction based on auto_merge flag
+            # and whether the finding passed all validation layers
+            all_layers_passed = _all_layers_passed(validation)
+            if auto_merge and all_layers_passed:
+                merge_instruction = (
+                    "After opening the PR, ALSO MERGE IT. This finding "
+                    "passed all validation layers with HIGH confidence."
+                )
+            else:
+                merge_instruction = "Do NOT merge the PR. Only open it."
+
             # Build the cleanup prompt
             prompt = _CLEANUP_PROMPT.format(
                 candidate_id=candidate_id,
@@ -350,6 +379,7 @@ class CleanupPRGenerator:
                     f"Remove {category} at {file_path}:{line} "
                     f"identified as dead code with HIGH confidence.",
                 ),
+                merge_instruction=merge_instruction,
             )
 
             # Send cleanup prompt

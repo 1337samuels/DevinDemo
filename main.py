@@ -311,6 +311,7 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
             poll_timeout=args.poll_timeout,
             max_acu_limit=args.max_acu,
             progress_tracker_factory=CleanupProgressTrackerFactory(),
+            auto_merge=getattr(args, 'auto_merge', False),
         )
     except DevinAPIError as exc:
         print(f"Devin API error: {exc}", file=sys.stderr)
@@ -612,6 +613,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional ACU cap for the Devin session.",
+    )
+    cleanup_p.add_argument(
+        "--auto-merge",
+        action="store_true",
+        default=False,
+        help=(
+            "Automatically merge PRs for findings that passed all "
+            "validation layers. If not set, PRs are only opened."
+        ),
     )
     cleanup_p.set_defaults(func=cmd_cleanup)
 
