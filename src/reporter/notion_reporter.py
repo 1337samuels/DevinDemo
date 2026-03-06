@@ -38,8 +38,37 @@ LAYER_DEFINITIONS: list[tuple[str, str, str]] = [
     ("layer_8_external_consumers", "Layer 8: External Consumers", "is_exported"),
 ]
 
+# Desired column order.  The Notion API uses the key order in the
+# ``properties`` dict when creating/updating a database to determine
+# the visual column order in the UI.  We define the order explicitly
+# here so it is easy to maintain.
+_COLUMN_ORDER: list[str] = [
+    "Candidate ID",
+    "Category",
+    "File",
+    "Line",
+    "Confidence",
+    "Validation Count",
+    "PR Opened",
+    "PR URL",
+    # --- everything after here is "the rest" ---
+    "Summary",
+    "Layer 1: Re-Confirm",
+    "Layer 2: Git Staleness",
+    "Layer 3: Active Dev",
+    "Layer 4: Reachability",
+    "Layer 5: Issue Archaeology",
+    "Layer 6: Test Coverage",
+    "Layer 7: Runtime Signals",
+    "Layer 8: External Consumers",
+    "Code Snippet",
+    "Detection Reasoning",
+]
+
 # Database property definitions used when creating a new database.
-_DB_PROPERTIES: dict[str, dict[str, Any]] = {
+# The dict is built in _COLUMN_ORDER so the Notion API receives the
+# keys in the exact visual order we want.
+_PROPERTY_DEFS: dict[str, dict[str, Any]] = {
     "Candidate ID": {"title": {}},
     "Category": {
         "select": {
@@ -63,12 +92,9 @@ _DB_PROPERTIES: dict[str, dict[str, Any]] = {
         }
     },
     "Validation Count": {"number": {"format": "number"}},
-    # PR fields (empty for now, filled when Phase 3 data is available)
     "PR Opened": {"checkbox": {}},
     "PR URL": {"url": {}},
-    # Remaining columns
     "Summary": {"rich_text": {}},
-    # 8 layer checkboxes
     "Layer 1: Re-Confirm": {"checkbox": {}},
     "Layer 2: Git Staleness": {"checkbox": {}},
     "Layer 3: Active Dev": {"checkbox": {}},
@@ -79,6 +105,11 @@ _DB_PROPERTIES: dict[str, dict[str, Any]] = {
     "Layer 8: External Consumers": {"checkbox": {}},
     "Code Snippet": {"rich_text": {}},
     "Detection Reasoning": {"rich_text": {}},
+}
+
+# Build the ordered dict that is actually sent to the Notion API.
+_DB_PROPERTIES: dict[str, dict[str, Any]] = {
+    col: _PROPERTY_DEFS[col] for col in _COLUMN_ORDER
 }
 
 
@@ -271,6 +302,30 @@ def _extract_candidates(
 # ---------------------------------------------------------------------------
 # Notion database creation
 # ---------------------------------------------------------------------------
+
+
+def _reorder_database_columns(
+    api_key: str,
+    database_id: str,
+) -> None:
+    """PATCH the database so columns appear in ``_COLUMN_ORDER``.
+
+    Notion determines the visual column order from the key order in the
+    ``properties`` dict sent via PATCH.  By sending all properties in
+    the desired order we force the UI to match, even if the database
+    was created with a different order or columns were later reordered
+    manually.
+    """
+    ordered_props: dict[str, dict[str, Any]] = {
+        col: _DB_PROPERTIES[col] for col in _COLUMN_ORDER
+    }
+    _notion_request(
+        "PATCH",
+        f"/databases/{database_id}",
+        api_key,
+        {"properties": ordered_props},
+    )
+    print("[notion] Reordered database columns.")
 
 
 def create_notion_database(
@@ -468,6 +523,13 @@ class NotionReporter:
             self._database_id = create_notion_database(
                 self._api_key, self._parent_page_id
             )
+
+        # Always reorder columns to ensure the desired visual order,
+        # whether the database was just created or already existed.
+        try:
+            _reorder_database_columns(self._api_key, self._database_id)
+        except NotionAPIError as exc:
+            print(f"[notion] WARNING: could not reorder columns: {exc}")
 
         # Extract and sort candidates
         rows = _extract_candidates(findings, cleanup_results)
