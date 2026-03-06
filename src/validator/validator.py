@@ -813,12 +813,90 @@ fired. Explain which blockers and what would need to change.
 
 ## Output
 
-Produce your results in the structured output. For each candidate fill in \
-ALL layer results (layer_1_reconfirm through layer_8_external_consumers), \
-the confidence level, a human-readable summary, and---where applicable---\
-a suggested PR title/description, blockers, or exempt reason.
+After completing all layers for every candidate, you MUST output a single \
+JSON object inside a ```json code fence. The JSON must follow this exact \
+structure (do NOT wrap it in markdown commentary — the JSON block must be \
+the very last thing you write):
 
-Also note any cross-candidate patterns in the patterns_observed array.
+```json
+{{
+  "candidates": [
+    {{
+      "candidate_id": "<id from the candidate list above>",
+      "layer_results": {{
+        "layer_1_reconfirm": {{
+          "confirmed": true,
+          "method": "...",
+          "explanation": "...",
+          "additional_files": []
+        }},
+        "layer_2_git_staleness": {{
+          "last_meaningful_edit_date": "YYYY-MM-DD",
+          "days_since_last_edit": 0,
+          "last_edit_commit_hash": "...",
+          "last_edit_author": "...",
+          "last_edit_message": "...",
+          "first_introduced_date": "YYYY-MM-DD",
+          "bulk_commits_filtered": 0,
+          "is_stale": true
+        }},
+        "layer_3_active_development": {{
+          "open_prs": [],
+          "recent_branches": [],
+          "actively_being_worked_on": false
+        }},
+        "layer_4_static_reachability": {{
+          "is_reachable": false,
+          "call_chain": "",
+          "has_broken_dependencies": false,
+          "framework_exemption": false,
+          "framework_pattern": ""
+        }},
+        "layer_5_issue_archaeology": {{
+          "issues": [],
+          "pr_comments": [],
+          "commit_messages": [],
+          "inline_annotations": [],
+          "code_owner": "",
+          "sentiment": "no_discussion"
+        }},
+        "layer_6_test_coverage": {{
+          "tests_reference_candidate": false,
+          "test_files": [],
+          "coverage_percentage": "unavailable",
+          "test_files_needing_update": []
+        }},
+        "layer_7_runtime_signals": {{
+          "flag_platform_available": false,
+          "flag_evaluation_count": null,
+          "apm_available": false,
+          "apm_invocation_count": null,
+          "referenced_in_infra": false,
+          "unavailable_reason": "..."
+        }},
+        "layer_8_external_consumers": {{
+          "is_exported": false,
+          "in_published_package": false,
+          "external_consumers_found": [],
+          "is_api_endpoint": false
+        }}
+      }},
+      "confidence": "HIGH | MEDIUM | LOW | EXEMPT",
+      "summary": "2-3 sentence verdict",
+      "blockers": ["...if LOW..."],
+      "suggested_pr_title": "...if HIGH or MEDIUM...",
+      "suggested_pr_description": "...if HIGH or MEDIUM...",
+      "exempt_reason": "...if EXEMPT...",
+      "detection_improvement_suggestion": "...if EXEMPT..."
+    }}
+  ],
+  "patterns_observed": ["any cross-candidate patterns you noticed"]
+}}
+```
+
+Fill in real values for every field. Omit optional fields (blockers, \
+suggested_pr_title, etc.) when they don't apply. The candidate_id MUST \
+match the id provided in the candidate list above.
 """
 
 
