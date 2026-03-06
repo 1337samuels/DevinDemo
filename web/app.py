@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import re
@@ -17,9 +16,11 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "devindemo-gui"
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Track the running process so we can cancel it
-_current_process: subprocess.Popen | None = None
-_process_lock = threading.Lock()
+# Per-phase process tracking — each phase can run concurrently,
+# but only one run per phase at a time.
+_VALID_PHASES = {"scan", "validate", "cleanup", "report"}
+_phase_processes: dict[str, subprocess.Popen | None] = {p: None for p in _VALID_PHASES}
+_phase_lock = threading.Lock()
 
 # Path to the project root (one level up from web/)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,12 +71,14 @@ def _discover_result_files(prefix: str) -> list[dict]:
         except (json.JSONDecodeError, OSError):
             pass
 
-        results.append({
-            "path": rel_path,
-            "repo": repo,
-            "datetime": dt_str,
-            "label": f"{repo}  \u2014  {dt_str}",
-        })
+        results.append(
+            {
+                "path": rel_path,
+                "repo": repo,
+                "datetime": dt_str,
+                "label": f"{repo}  \u2014  {dt_str}",
+            }
+        )
 
     # Sort newest first (by datetime string, which is lexicographically sortable)
     results.sort(key=lambda r: r["datetime"], reverse=True)
@@ -97,7 +100,10 @@ def api_results(prefix: str):
 
 # Keys/secrets that should be masked in console output
 _SECRET_FLAGS = {
-    "--api-key", "--v1-api-key", "--notion-api-key", "--slack-webhook-url",
+    "--api-key",
+    "--v1-api-key",
+    "--notion-api-key",
+    "--slack-webhook-url",
 }
 
 
@@ -117,11 +123,17 @@ def _mask_cmd(cmd: list[str]) -> str:
     return " ".join(parts)
 
 
-def _stream_process(cmd: list[str], sid: str) -> None:
-    """Run a subprocess and stream its stdout/stderr to the client via SocketIO."""
-    global _current_process
+def _stream_process(cmd: list[str], phase: str, sid: str) -> None:
+    """Run a subprocess and stream its stdout/stderr to the client via SocketIO.
 
-    socketio.emit("console_output", {"data": f"$ {_mask_cmd(cmd)}\n"}, to=sid)
+    Each phase emits to its own ``console_output_<phase>`` and
+    ``process_done_<phase>`` events so the frontend can display them in
+    separate console panels.
+    """
+    out_event = f"console_output_{phase}"
+    done_event = f"process_done_{phase}"
+
+    socketio.emit(out_event, {"data": f"$ {_mask_cmd(cmd)}\n"}, to=sid)
 
     try:
         proc = subprocess.Popen(
@@ -134,36 +146,39 @@ def _stream_process(cmd: list[str], sid: str) -> None:
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
-        with _process_lock:
-            _current_process = proc
+        with _phase_lock:
+            _phase_processes[phase] = proc
 
         for line in proc.stdout:
-            socketio.emit("console_output", {"data": line}, to=sid)
+            socketio.emit(out_event, {"data": line}, to=sid)
 
         proc.wait()
         exit_code = proc.returncode
 
         if exit_code == 0:
             socketio.emit(
-                "process_done",
-                {"data": f"\nProcess finished successfully (exit code 0)\n", "success": True},
+                done_event,
+                {
+                    "data": "\nProcess finished successfully (exit code 0)\n",
+                    "success": True,
+                },
                 to=sid,
             )
         else:
             socketio.emit(
-                "process_done",
+                done_event,
                 {"data": f"\nProcess exited with code {exit_code}\n", "success": False},
                 to=sid,
             )
     except Exception as exc:
         socketio.emit(
-            "process_done",
+            done_event,
             {"data": f"\nError: {exc}\n", "success": False},
             to=sid,
         )
     finally:
-        with _process_lock:
-            _current_process = None
+        with _phase_lock:
+            _phase_processes[phase] = None
 
 
 @socketio.on("run_phase")
@@ -175,12 +190,23 @@ def handle_run_phase(data):
 
     if not sid:
         from flask import request as flask_request
+
         sid = flask_request.sid
 
-    # Check if a process is already running
-    with _process_lock:
-        if _current_process is not None and _current_process.poll() is None:
-            emit("console_output", {"data": "A process is already running. Please wait or stop it first.\n"})
+    if phase not in _VALID_PHASES:
+        emit(f"console_output_{phase}", {"data": f"Unknown phase: {phase}\n"})
+        return
+
+    # Check if this specific phase already has a running process
+    with _phase_lock:
+        proc = _phase_processes.get(phase)
+        if proc is not None and proc.poll() is None:
+            emit(
+                f"console_output_{phase}",
+                {
+                    "data": f"Phase '{phase}' is already running. Please wait or stop it first.\n"
+                },
+            )
             return
 
     cmd = [sys.executable, "main.py"]
@@ -266,26 +292,35 @@ def handle_run_phase(data):
             cmd.extend(["--slack-webhook-url", args["slack_webhook_url"]])
 
     else:
-        emit("console_output", {"data": f"Unknown phase: {phase}\n"})
+        emit(f"console_output_{phase}", {"data": f"Unknown phase: {phase}\n"})
         return
 
-    # Run in a background thread so we don't block
+    # Run in a background thread so we don't block.
+    # Each phase runs independently — multiple phases can execute concurrently.
     from flask import request as flask_request
+
     client_sid = flask_request.sid
-    thread = threading.Thread(target=_stream_process, args=(cmd, client_sid), daemon=True)
+    thread = threading.Thread(
+        target=_stream_process, args=(cmd, phase, client_sid), daemon=True
+    )
     thread.start()
 
 
 @socketio.on("stop_process")
-def handle_stop():
-    """Stop the currently running process."""
-    global _current_process
-    with _process_lock:
-        if _current_process is not None and _current_process.poll() is None:
-            _current_process.terminate()
-            emit("console_output", {"data": "\nProcess terminated by user.\n"})
+def handle_stop(data=None):
+    """Stop a running process for a specific phase."""
+    phase = (data or {}).get("phase", "scan")
+    out_event = f"console_output_{phase}"
+    with _phase_lock:
+        proc = _phase_processes.get(phase)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            emit(out_event, {"data": "\nProcess terminated by user.\n"})
         else:
-            emit("console_output", {"data": "No process is currently running.\n"})
+            emit(
+                out_event,
+                {"data": f"No process is currently running for phase '{phase}'.\n"},
+            )
 
 
 if __name__ == "__main__":
