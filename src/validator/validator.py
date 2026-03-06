@@ -482,17 +482,25 @@ VALIDATION_OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 # ---------------------------------------------------------------------------
-# Prompt template
+# Prompt template — split into composable sections
 # ---------------------------------------------------------------------------
 # The double-braces (e.g. ``{{file_path}}``) are literal in the prompt text
 # and instruct the Devin session what shell commands to run.  The single-
 # brace placeholders (e.g. ``{candidate_block}``) are filled in by Python's
 # ``str.format()`` before the prompt is sent.
+#
+# The prompt is assembled from three parts:
+#   1. ``_PROMPT_HEADER``  — intro + candidate block + repo context
+#   2. One ``_LAYER_PROMPTS[n]`` entry per selected layer
+#   3. ``_PROMPT_FOOTER``  — confidence scoring + JSON output instructions
+#
+# This allows callers to select a subset of layers while keeping the
+# prompt internally consistent.
 
-_VALIDATION_PROMPT = """\
+_PROMPT_HEADER = """\
 You are validating whether a piece of suspected dead code is truly safe to \
-remove. You will run 8 validation layers against it, collect evidence, and \
-produce a structured verdict.
+remove. You will run {layer_count} validation layer(s) against it, collect \
+evidence, and produce a structured verdict.
 
 Think like a cautious junior engineer who's been told "figure out if this is \
 safe to delete." Check everything, assume nothing. False positives \
@@ -511,10 +519,18 @@ language-appropriate tooling to investigate.
 
 ## Validation Layers
 
-Run ALL 8 layers below, in order, for EACH candidate. For each layer, \
-record what you checked, what you found, and your conclusion. If a layer \
-requires access you don't have (e.g., no APM platform), note it as \
-unavailable and move on.
+Run ALL {layer_count} layer(s) below, in order, for EACH candidate. For \
+each layer, record what you checked, what you found, and your conclusion. \
+If a layer requires access you don't have (e.g., no APM platform), note it \
+as unavailable and move on.
+"""
+
+# Each entry is keyed by layer number (1-8).  The value is the prompt text
+# for that layer, ready to be included between _PROMPT_HEADER and
+# _PROMPT_FOOTER.  Placeholders use the same ``{name}`` convention.
+
+_LAYER_PROMPTS: dict[int, str] = {
+    1: """\
 
 ---
 
@@ -546,6 +562,8 @@ Record:
 **If you cannot confirm the detection is real code, STOP HERE. Mark this \
 candidate as EXEMPT (false positive) and skip the remaining layers. \
 Explain why.**
+""",
+    2: """\
 
 ---
 
@@ -580,6 +598,8 @@ Record:
 - how many bulk/cosmetic commits were filtered out
 - whether the code is stale (last meaningful edit > {staleness_days} \
   days ago)
+""",
+    3: """\
 
 ---
 
@@ -612,6 +632,8 @@ Record:
 
 **If actively being worked on -> this is a BLOCKER. Note it clearly. \
 Confidence cannot be higher than LOW regardless of what other layers find.**
+""",
+    4: """\
 
 ---
 
@@ -661,6 +683,8 @@ Record:
 
 **If a framework exemption is triggered -> this is a BLOCKER. Confidence \
 cannot be higher than LOW.**
+""",
+    5: """\
 
 ---
 
@@ -700,6 +724,8 @@ Record:
 **If inline annotations say "keep", "do not remove", "re-enable", or \
 "needed for" -> BLOCKER. If an open issue states the code is planned for \
 future use -> BLOCKER.**
+""",
+    6: """\
 
 ---
 
@@ -733,6 +759,8 @@ Record:
 
 **If active (non-stale) tests with >0% coverage exist for the candidate \
 -> confidence cannot exceed MEDIUM.**
+""",
+    7: """\
 
 ---
 
@@ -762,6 +790,8 @@ Record:
 - what was unavailable and why
 
 **If non-zero production flag evaluations or APM invocations -> BLOCKER.**
+""",
+    8: """\
 
 ---
 
@@ -787,19 +817,134 @@ Record:
 - whether it's an API endpoint with potential external callers
 
 **If external consumers are found -> BLOCKER.**
+""",
+}
+
+# Map from layer number to the JSON output key and example block.
+# Used to build the JSON example in the output section dynamically.
+
+_LAYER_JSON_EXAMPLES: dict[int, tuple[str, str]] = {
+    1: (
+        "layer_1_reconfirm",
+        '"layer_1_reconfirm": {{\n'
+        '          "confirmed": true,\n'
+        '          "method": "...",\n'
+        '          "explanation": "...",\n'
+        '          "additional_files": []\n'
+        '        }}',
+    ),
+    2: (
+        "layer_2_git_staleness",
+        '"layer_2_git_staleness": {{\n'
+        '          "last_meaningful_edit_date": "YYYY-MM-DD",\n'
+        '          "days_since_last_edit": 0,\n'
+        '          "last_edit_commit_hash": "...",\n'
+        '          "last_edit_author": "...",\n'
+        '          "last_edit_message": "...",\n'
+        '          "first_introduced_date": "YYYY-MM-DD",\n'
+        '          "bulk_commits_filtered": 0,\n'
+        '          "is_stale": true\n'
+        '        }}',
+    ),
+    3: (
+        "layer_3_active_development",
+        '"layer_3_active_development": {{\n'
+        '          "open_prs": [],\n'
+        '          "recent_branches": [],\n'
+        '          "actively_being_worked_on": false\n'
+        '        }}',
+    ),
+    4: (
+        "layer_4_static_reachability",
+        '"layer_4_static_reachability": {{\n'
+        '          "is_reachable": false,\n'
+        '          "call_chain": "",\n'
+        '          "has_broken_dependencies": false,\n'
+        '          "framework_exemption": false,\n'
+        '          "framework_pattern": ""\n'
+        '        }}',
+    ),
+    5: (
+        "layer_5_issue_archaeology",
+        '"layer_5_issue_archaeology": {{\n'
+        '          "issues": [],\n'
+        '          "pr_comments": [],\n'
+        '          "commit_messages": [],\n'
+        '          "inline_annotations": [],\n'
+        '          "code_owner": "",\n'
+        '          "sentiment": "no_discussion"\n'
+        '        }}',
+    ),
+    6: (
+        "layer_6_test_coverage",
+        '"layer_6_test_coverage": {{\n'
+        '          "tests_reference_candidate": false,\n'
+        '          "test_files": [],\n'
+        '          "coverage_percentage": "unavailable",\n'
+        '          "test_files_needing_update": []\n'
+        '        }}',
+    ),
+    7: (
+        "layer_7_runtime_signals",
+        '"layer_7_runtime_signals": {{\n'
+        '          "flag_platform_available": false,\n'
+        '          "flag_evaluation_count": null,\n'
+        '          "apm_available": false,\n'
+        '          "apm_invocation_count": null,\n'
+        '          "referenced_in_infra": false,\n'
+        '          "unavailable_reason": "..."\n'
+        '        }}',
+    ),
+    8: (
+        "layer_8_external_consumers",
+        '"layer_8_external_consumers": {{\n'
+        '          "is_exported": false,\n'
+        '          "in_published_package": false,\n'
+        '          "external_consumers_found": [],\n'
+        '          "is_api_endpoint": false\n'
+        '        }}',
+    ),
+}
+
+
+def _build_prompt_footer(selected_layers: list[int]) -> str:
+    """Build the confidence-scoring + JSON output section of the prompt.
+
+    The confidence thresholds are scaled proportionally to the number of
+    selected layers so that running 4/8 layers produces the same quality
+    thresholds as running 8/8.
+    """
+    n = len(selected_layers)
+    high_threshold = max(1, int(n * 5 / 8 + 0.5))  # ~63 %
+
+    # Build the layer_results JSON example with only selected layers
+    layer_json_parts = []
+    for num in sorted(selected_layers):
+        if num in _LAYER_JSON_EXAMPLES:
+            layer_json_parts.append(
+                "        " + _LAYER_JSON_EXAMPLES[num][1]
+            )
+    layer_results_block = ",\n".join(layer_json_parts)
+
+    # Confidence section includes layer-1 EXEMPT note only if layer 1 selected
+    exempt_line = ""
+    if 1 in selected_layers:
+        exempt_line = (
+            "\n**EXEMPT:** Layer 1 failed (detection was a false positive). "
+            "Stop processing.\n"
+        )
+
+    return f"""\
 
 ---
 
 ## Confidence Scoring
 
-After all 8 layers, compute a confidence level:
-
-**EXEMPT:** Layer 1 failed (detection was a false positive). Stop processing.
-
-**HIGH (recommend auto-removal PR):** Zero blockers from any layer. Code \
-is stale, unreachable, undiscussed, untested (or tests are also stale), \
-no runtime activity, no external consumers. At least 5 of the 8 layers \
-actively corroborate that the code is dead.
+After all {n} layer(s), compute a confidence level:
+{exempt_line}
+**HIGH (recommend auto-removal PR):** Zero blockers from any layer. \
+At least {high_threshold} of the {n} selected layer(s) actively \
+corroborate that the code is dead.
 
 **MEDIUM (recommend draft PR for human review):** Zero hard blockers. Some \
 ambiguity exists --- maybe tests reference it but are stale, or an issue \
@@ -815,72 +960,17 @@ fired. Explain which blockers and what would need to change.
 
 After completing all layers for every candidate, you MUST output a single \
 JSON object inside a ```json code fence. The JSON must follow this exact \
-structure (do NOT wrap it in markdown commentary — the JSON block must be \
+structure (do NOT wrap it in markdown commentary \u2014 the JSON block must be \
 the very last thing you write):
 
 ```json
-{{
+{{{{
   "candidates": [
-    {{
+    {{{{
       "candidate_id": "<id from the candidate list above>",
-      "layer_results": {{
-        "layer_1_reconfirm": {{
-          "confirmed": true,
-          "method": "...",
-          "explanation": "...",
-          "additional_files": []
-        }},
-        "layer_2_git_staleness": {{
-          "last_meaningful_edit_date": "YYYY-MM-DD",
-          "days_since_last_edit": 0,
-          "last_edit_commit_hash": "...",
-          "last_edit_author": "...",
-          "last_edit_message": "...",
-          "first_introduced_date": "YYYY-MM-DD",
-          "bulk_commits_filtered": 0,
-          "is_stale": true
-        }},
-        "layer_3_active_development": {{
-          "open_prs": [],
-          "recent_branches": [],
-          "actively_being_worked_on": false
-        }},
-        "layer_4_static_reachability": {{
-          "is_reachable": false,
-          "call_chain": "",
-          "has_broken_dependencies": false,
-          "framework_exemption": false,
-          "framework_pattern": ""
-        }},
-        "layer_5_issue_archaeology": {{
-          "issues": [],
-          "pr_comments": [],
-          "commit_messages": [],
-          "inline_annotations": [],
-          "code_owner": "",
-          "sentiment": "no_discussion"
-        }},
-        "layer_6_test_coverage": {{
-          "tests_reference_candidate": false,
-          "test_files": [],
-          "coverage_percentage": "unavailable",
-          "test_files_needing_update": []
-        }},
-        "layer_7_runtime_signals": {{
-          "flag_platform_available": false,
-          "flag_evaluation_count": null,
-          "apm_available": false,
-          "apm_invocation_count": null,
-          "referenced_in_infra": false,
-          "unavailable_reason": "..."
-        }},
-        "layer_8_external_consumers": {{
-          "is_exported": false,
-          "in_published_package": false,
-          "external_consumers_found": [],
-          "is_api_endpoint": false
-        }}
-      }},
+      "layer_results": {{{{
+{layer_results_block}
+      }}}},
       "confidence": "HIGH | MEDIUM | LOW | EXEMPT",
       "summary": "2-3 sentence verdict",
       "blockers": ["...if LOW..."],
@@ -888,16 +978,34 @@ the very last thing you write):
       "suggested_pr_description": "...if HIGH or MEDIUM...",
       "exempt_reason": "...if EXEMPT...",
       "detection_improvement_suggestion": "...if EXEMPT..."
-    }}
+    }}}}
   ],
   "patterns_observed": ["any cross-candidate patterns you noticed"]
-}}
+}}}}
 ```
 
 Fill in real values for every field. Omit optional fields (blockers, \
 suggested_pr_title, etc.) when they don't apply. The candidate_id MUST \
 match the id provided in the candidate list above.
 """
+
+
+# ---------------------------------------------------------------------------
+# Public layer metadata — used by the CLI and web UI
+# ---------------------------------------------------------------------------
+
+ALL_LAYER_NUMBERS: list[int] = [1, 2, 3, 4, 5, 6, 7, 8]
+
+LAYER_LABELS: dict[int, str] = {
+    1: "Re-Confirm the Detection",
+    2: "Git History Staleness",
+    3: "Active Development Cross-Reference",
+    4: "Static Reachability Analysis",
+    5: "Issue & Discussion Archaeology",
+    6: "Test Coverage & Test References",
+    7: "Runtime & Deployment Signals",
+    8: "Cross-Repository & External Consumers",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1225,9 +1333,13 @@ class LegacyCodeValidator:
         client: DevinAPIClient,
         *,
         config: dict[str, int] | None = None,
+        selected_layers: list[int] | None = None,
     ) -> None:
         self._client = client
         self._config = {**DEFAULT_CONFIG, **(config or {})}
+        self._selected_layers: list[int] = sorted(
+            selected_layers if selected_layers is not None else ALL_LAYER_NUMBERS
+        )
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -1482,17 +1594,31 @@ class LegacyCodeValidator:
         category_label: str,
         candidates: list[dict[str, Any]],
     ) -> str:
-        """Fill in the prompt template for a batch of candidates."""
+        """Fill in the prompt template for a batch of candidates.
+
+        Only the layers in ``self._selected_layers`` are included in the
+        prompt.  The confidence thresholds in the footer are scaled
+        proportionally.
+        """
         candidate_block = _format_candidate_block(candidates, category_label)
-        return _VALIDATION_PROMPT.format(
-            candidate_block=candidate_block,
-            staleness_days=self._config["staleness_days"],
-            pr_lookback_days=self._config["pr_lookback_days"],
-            branch_lookback_days=self._config["branch_lookback_days"],
-            bulk_commit_threshold=self._config["bulk_commit_threshold"],
-            issue_lookback_days=self._config["issue_lookback_days"],
-            flag_eval_days=self._config["flag_eval_days"],
-        )
+        fmt_kwargs: dict[str, object] = {
+            "candidate_block": candidate_block,
+            "layer_count": len(self._selected_layers),
+            "staleness_days": self._config["staleness_days"],
+            "pr_lookback_days": self._config["pr_lookback_days"],
+            "branch_lookback_days": self._config["branch_lookback_days"],
+            "bulk_commit_threshold": self._config["bulk_commit_threshold"],
+            "issue_lookback_days": self._config["issue_lookback_days"],
+            "flag_eval_days": self._config["flag_eval_days"],
+        }
+
+        # Assemble: header + selected layer prompts + footer
+        parts: list[str] = [_PROMPT_HEADER.format(**fmt_kwargs)]
+        for layer_num in self._selected_layers:
+            if layer_num in _LAYER_PROMPTS:
+                parts.append(_LAYER_PROMPTS[layer_num].format(**fmt_kwargs))
+        parts.append(_build_prompt_footer(self._selected_layers))
+        return "".join(parts)
 
     @staticmethod
     def _print_summary(report: dict[str, Any]) -> None:
