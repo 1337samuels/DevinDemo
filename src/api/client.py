@@ -241,9 +241,17 @@ class DevinAPIClient:
     ) -> dict[str, Any]:
         """Poll a session until it reaches a terminal or idle status.
 
+        Uses **adaptive polling**: 2 s while the session is idle or
+        initialising (``waiting_for_user``, ``claimed``, ``new``),
+        switching to *interval* seconds once Devin is actively
+        ``working``.  This avoids wasting time on slow polls while
+        the session is transitioning between states.
+
         Args:
             session_id: The session to poll.
-            interval: Seconds between polls (default 15).
+            interval: Seconds between polls while Devin is actively
+                working (default 15).  Idle/transitional states always
+                poll every 2 s.
             timeout: Maximum total seconds to wait (default 600).
             on_update: Optional callback ``(session_dict) -> None``
                        called after each poll.
@@ -271,7 +279,6 @@ class DevinAPIClient:
             TimeoutError: If *timeout* seconds elapse before completion.
         """
         deadline = time.monotonic() + timeout
-        first_poll = True
         saw_running = (
             not expect_running_first
         )  # False means: skip initial waiting_for_user
@@ -324,10 +331,13 @@ class DevinAPIClient:
                     f"(last status: {status}/{status_detail})"
                 )
 
-            # Short delay on first poll so the user sees status immediately,
-            # then switch to the normal interval.
-            if first_poll:
-                first_poll = False
+            # Adaptive polling: 2s while the session is idle/initialising
+            # (waiting_for_user, claimed, new) so we don't miss the
+            # transition to "working".  Use the full interval only once
+            # Devin is actively working, to avoid unnecessary API calls.
+            _FAST_POLL_DETAILS = {"waiting_for_user", "None", None, ""}
+            _FAST_POLL_STATUSES = {"claimed", "new"}
+            if status in _FAST_POLL_STATUSES or status_detail in _FAST_POLL_DETAILS:
                 time.sleep(2)
             else:
                 time.sleep(interval)
