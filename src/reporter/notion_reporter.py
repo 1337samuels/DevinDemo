@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -328,16 +329,35 @@ def _reorder_database_columns(
     print("[notion] Reordered database columns.")
 
 
+
+def _build_db_title(repo: str | None) -> str:
+    """Build a descriptive database title with repo name and timestamp.
+
+    Format: ``Dead Code Report \u2014 owner/repo \u2014 2026-03-06 16:30 UTC``
+    Falls back to a generic title when *repo* is not available.
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    if repo:
+        return f"Dead Code Report \u2014 {repo} \u2014 {ts}"
+    return f"Dead Code Report \u2014 {ts}"
+
+
 def create_notion_database(
     api_key: str,
     parent_page_id: str,
-    title: str = "Tech Debt & Dead Code Report",
+    title: str | None = None,
+    repo: str | None = None,
 ) -> str:
     """Create a new Notion database under the given parent page.
+
+    If *title* is not provided, one is generated from *repo* and the
+    current timestamp so that each run produces a uniquely named DB.
 
     Returns:
         The database ID of the newly created database.
     """
+    if not title:
+        title = _build_db_title(repo)
     payload: dict[str, Any] = {
         "parent": {"type": "page_id", "page_id": parent_page_id},
         "title": [{"type": "text", "text": {"content": title}}],
@@ -520,8 +540,9 @@ class NotionReporter:
                 raise ValueError(
                     "Either database_id or parent_page_id must be provided."
                 )
+            repo = findings.get("repo")
             self._database_id = create_notion_database(
-                self._api_key, self._parent_page_id
+                self._api_key, self._parent_page_id, repo=repo
             )
 
         # Always reorder columns to ensure the desired visual order,

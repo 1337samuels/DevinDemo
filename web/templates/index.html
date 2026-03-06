@@ -138,6 +138,16 @@
             opacity: 0.5;
         }
 
+        .form-group input.secret-loaded {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        .form-group input.secret-loaded::placeholder {
+            color: var(--green);
+            opacity: 0.8;
+        }
+
         .form-group select {
             appearance: none;
             -webkit-appearance: none;
@@ -786,6 +796,28 @@
         }
         loadAllDropdowns();
 
+        // ----- Secrets auto-fill -----
+        // Track which fields have secrets loaded so runPhase can skip them
+        let secretFields = {};
+
+        async function loadSecrets() {
+            try {
+                const resp = await fetch('/api/secrets');
+                const data = await resp.json();
+                secretFields = data.field_map || {};
+                for (const [fieldId, loaded] of Object.entries(secretFields)) {
+                    const input = document.getElementById(fieldId);
+                    if (input && loaded) {
+                        input.placeholder = 'Found in secrets.txt';
+                        input.classList.add('secret-loaded');
+                    }
+                }
+            } catch (err) {
+                console.warn('Could not load secrets:', err);
+            }
+        }
+        loadSecrets();
+
         // ----- Tab switching -----
         document.querySelectorAll('.tab').forEach(function(tab) {
             tab.addEventListener('click', function() {
@@ -846,19 +878,28 @@
 
             let args = {};
 
+            // Helper: check if a field is covered by secrets.txt
+            function hasSecret(fieldId) {
+                return !!secretFields[fieldId];
+            }
+
             if (currentPhase === 'scan') {
                 const apiKey = getVal('scan-api-key');
                 const v1ApiKey = getVal('scan-v1-api-key');
                 const orgId = getVal('scan-org-id');
                 const repo = getVal('scan-repo');
-                if (!apiKey || !v1ApiKey || !orgId || !repo) {
+                // Only require manual input for fields NOT covered by secrets.txt
+                if ((!apiKey && !hasSecret('scan-api-key')) ||
+                    (!v1ApiKey && !hasSecret('scan-v1-api-key')) ||
+                    (!orgId && !hasSecret('scan-org-id')) ||
+                    !repo) {
                     alert('API Key (v3), API Key (v1), Organization ID, and Repository are required.');
                     return;
                 }
                 args = {
-                    api_key: apiKey,
-                    v1_api_key: v1ApiKey,
-                    org_id: orgId,
+                    api_key: apiKey || null,
+                    v1_api_key: v1ApiKey || null,
+                    org_id: orgId || null,
                     repo: repo,
                     output: getVal('scan-output') || null,
                     batch_size: getNumVal('scan-batch-size'),
@@ -871,7 +912,10 @@
                 const v1ApiKey = getVal('validate-v1-api-key');
                 const orgId = getVal('validate-org-id');
                 const inputFile = getFilePath('validate-input');
-                if (!apiKey || !v1ApiKey || !orgId || !inputFile) {
+                if ((!apiKey && !hasSecret('validate-api-key')) ||
+                    (!v1ApiKey && !hasSecret('validate-v1-api-key')) ||
+                    (!orgId && !hasSecret('validate-org-id')) ||
+                    !inputFile) {
                     alert('API Key (v3), API Key (v1), Organization ID, and Input File are required.');
                     return;
                 }
@@ -884,9 +928,9 @@
                 const totalLayers = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]').length;
                 const checkedCount = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]:checked').length;
                 args = {
-                    api_key: apiKey,
-                    v1_api_key: v1ApiKey,
-                    org_id: orgId,
+                    api_key: apiKey || null,
+                    v1_api_key: v1ApiKey || null,
+                    org_id: orgId || null,
                     input_file: inputFile,
                     output: getVal('validate-output') || null,
                     poll_interval: getNumVal('validate-poll-interval'),
