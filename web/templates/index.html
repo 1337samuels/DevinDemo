@@ -346,6 +346,7 @@
 
         <!-- Phase tabs -->
         <div class="tabs">
+            <button class="tab" data-phase="dashboard">Dashboard</button>
             <button class="tab active" data-phase="scan">Phase 1: Scan</button>
             <button class="tab" data-phase="validate">Phase 2: Validate</button>
             <button class="tab stub" data-phase="cleanup">Phase 3: Cleanup</button>
@@ -394,6 +395,19 @@
                     <label>Max ACU</label>
                     <input type="number" id="scan-max-acu" placeholder="Optional" />
                 </div>
+            </div>
+
+            <!-- Scan console -->
+            <div class="console-panel" id="console-panel-scan">
+                <div class="console-header">
+                    <h3><span class="status-dot" id="status-dot-scan"></span> Console</h3>
+                    <div class="console-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-run-scan" onclick="runPhase('scan')">Run</button>
+                        <button class="btn btn-danger btn-sm" id="btn-stop-scan" onclick="stopProcess('scan')" style="display:none;">Stop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('scan')">Clear</button>
+                    </div>
+                </div>
+                <div class="console" id="console-scan"></div>
             </div>
         </div>
 
@@ -461,6 +475,19 @@
                     <input type="number" id="validate-issue-lookback-days" placeholder="180" />
                 </div>
             </div>
+
+            <!-- Validate console -->
+            <div class="console-panel" id="console-panel-validate">
+                <div class="console-header">
+                    <h3><span class="status-dot" id="status-dot-validate"></span> Console</h3>
+                    <div class="console-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-run-validate" onclick="runPhase('validate')">Run</button>
+                        <button class="btn btn-danger btn-sm" id="btn-stop-validate" onclick="stopProcess('validate')" style="display:none;">Stop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('validate')">Clear</button>
+                    </div>
+                </div>
+                <div class="console" id="console-validate"></div>
+            </div>
         </div>
 
         <!-- Phase 3: Cleanup (stub) -->
@@ -468,6 +495,19 @@
             <div class="stub-notice">
                 <h3>Not Yet Implemented</h3>
                 <p>Phase 3 (Cleanup PR generation) is not yet available.</p>
+            </div>
+
+            <!-- Cleanup console -->
+            <div class="console-panel" id="console-panel-cleanup">
+                <div class="console-header">
+                    <h3><span class="status-dot" id="status-dot-cleanup"></span> Console</h3>
+                    <div class="console-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-run-cleanup" onclick="runPhase('cleanup')">Run</button>
+                        <button class="btn btn-danger btn-sm" id="btn-stop-cleanup" onclick="stopProcess('cleanup')" style="display:none;">Stop</button>
+                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('cleanup')">Clear</button>
+                    </div>
+                </div>
+                <div class="console" id="console-cleanup"></div>
             </div>
         </div>
 
@@ -522,53 +562,11 @@
                     <input type="text" id="report-slack-webhook-url" placeholder="https://hooks.slack.com/services/..." />
                 </div>
             </div>
-        </div>
 
-        <!-- Per-phase actions + console are inside each panel -->
-    </div>
-
-    <!-- Per-phase console panels (always visible, stacked at bottom) -->
-    <div class="container consoles-container">
-        <div class="console-grid">
-            <div class="console-panel" id="console-panel-scan">
-                <div class="console-header">
-                    <h3><span class="status-dot" id="status-dot-scan"></span> Phase 1: Scan</h3>
-                    <div class="console-actions">
-                        <button class="btn btn-primary btn-sm" id="btn-run-scan" onclick="runPhase('scan')">Run</button>
-                        <button class="btn btn-danger btn-sm" id="btn-stop-scan" onclick="stopProcess('scan')" style="display:none;">Stop</button>
-                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('scan')">Clear</button>
-                    </div>
-                </div>
-                <div class="console" id="console-scan"></div>
-            </div>
-
-            <div class="console-panel" id="console-panel-validate">
-                <div class="console-header">
-                    <h3><span class="status-dot" id="status-dot-validate"></span> Phase 2: Validate</h3>
-                    <div class="console-actions">
-                        <button class="btn btn-primary btn-sm" id="btn-run-validate" onclick="runPhase('validate')">Run</button>
-                        <button class="btn btn-danger btn-sm" id="btn-stop-validate" onclick="stopProcess('validate')" style="display:none;">Stop</button>
-                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('validate')">Clear</button>
-                    </div>
-                </div>
-                <div class="console" id="console-validate"></div>
-            </div>
-
-            <div class="console-panel" id="console-panel-cleanup">
-                <div class="console-header">
-                    <h3><span class="status-dot" id="status-dot-cleanup"></span> Phase 3: Cleanup</h3>
-                    <div class="console-actions">
-                        <button class="btn btn-primary btn-sm" id="btn-run-cleanup" onclick="runPhase('cleanup')">Run</button>
-                        <button class="btn btn-danger btn-sm" id="btn-stop-cleanup" onclick="stopProcess('cleanup')" style="display:none;">Stop</button>
-                        <button class="btn btn-secondary btn-sm" onclick="clearConsole('cleanup')">Clear</button>
-                    </div>
-                </div>
-                <div class="console" id="console-cleanup"></div>
-            </div>
-
+            <!-- Report console -->
             <div class="console-panel" id="console-panel-report">
                 <div class="console-header">
-                    <h3><span class="status-dot" id="status-dot-report"></span> Phase 4: Report</h3>
+                    <h3><span class="status-dot" id="status-dot-report"></span> Console</h3>
                     <div class="console-actions">
                         <button class="btn btn-primary btn-sm" id="btn-run-report" onclick="runPhase('report')">Run</button>
                         <button class="btn btn-danger btn-sm" id="btn-stop-report" onclick="stopProcess('report')" style="display:none;">Stop</button>
@@ -577,6 +575,11 @@
                 </div>
                 <div class="console" id="console-report"></div>
             </div>
+        </div>
+
+        <!-- Dashboard: shows all 4 consoles in a grid -->
+        <div class="phase-panel" id="panel-dashboard">
+            <div class="console-grid" id="dashboard-grid"></div>
         </div>
     </div>
 
@@ -671,6 +674,41 @@
         }
         loadAllDropdowns();
 
+        // ----- Dashboard: move console panels in/out of the grid -----
+
+        const PHASES = ['scan', 'validate', 'cleanup', 'report'];
+        const dashboardGrid = document.getElementById('dashboard-grid');
+
+        // Original parent locations so we can move consoles back
+        const consoleHomeParent = {};
+        PHASES.forEach(function(p) {
+            const panel = document.getElementById('console-panel-' + p);
+            consoleHomeParent[p] = panel.parentElement;
+        });
+
+        function populateDashboard() {
+            PHASES.forEach(function(p) {
+                const panel = document.getElementById('console-panel-' + p);
+                // Update header to show phase name in dashboard view
+                panel.querySelector('.console-header h3').innerHTML =
+                    '<span class="status-dot' +
+                    (phaseRunning[p] ? ' running' : '') +
+                    '" id="status-dot-' + p + '"></span> Phase: ' +
+                    p.charAt(0).toUpperCase() + p.slice(1);
+                dashboardGrid.appendChild(panel);
+            });
+        }
+
+        function restoreConsole(phase) {
+            const panel = document.getElementById('console-panel-' + phase);
+            // Restore simple "Console" header when inside its own phase tab
+            panel.querySelector('.console-header h3').innerHTML =
+                '<span class="status-dot' +
+                (phaseRunning[phase] ? ' running' : '') +
+                '" id="status-dot-' + phase + '"></span> Console';
+            consoleHomeParent[phase].appendChild(panel);
+        }
+
         // ----- Tab switching -----
         document.querySelectorAll('.tab').forEach(function(tab) {
             tab.addEventListener('click', function() {
@@ -680,6 +718,13 @@
                 tab.classList.add('active');
                 currentPhase = tab.dataset.phase;
                 document.getElementById('panel-' + currentPhase).classList.add('active');
+
+                if (currentPhase === 'dashboard') {
+                    populateDashboard();
+                } else {
+                    // Move all consoles back to their home panels
+                    PHASES.forEach(restoreConsole);
+                }
                 loadAllDropdowns();
             });
         });
@@ -687,10 +732,10 @@
         // ----- Per-phase console output via SocketIO -----
 
         function setupPhaseConsole(phase) {
-            const consoleEl = document.getElementById('console-' + phase);
-            const statusDot = document.getElementById('status-dot-' + phase);
-
+            // Query DOM dynamically (elements move between phase panels and dashboard)
             socket.on('console_output_' + phase, (msg) => {
+                const consoleEl = document.getElementById('console-' + phase);
+                if (!consoleEl) return;
                 const span = document.createElement('span');
                 const text = msg.data;
                 if (text.startsWith('$')) {
@@ -702,6 +747,8 @@
             });
 
             socket.on('process_done_' + phase, (msg) => {
+                const consoleEl = document.getElementById('console-' + phase);
+                if (!consoleEl) return;
                 const span = document.createElement('span');
                 span.className = msg.success ? 'success' : 'error';
                 span.textContent = msg.data;
@@ -709,7 +756,8 @@
                 consoleEl.scrollTop = consoleEl.scrollHeight;
 
                 phaseRunning[phase] = false;
-                statusDot.className = msg.success ? 'status-dot success' : 'status-dot error';
+                const statusDot = document.getElementById('status-dot-' + phase);
+                if (statusDot) statusDot.className = msg.success ? 'status-dot success' : 'status-dot error';
                 document.getElementById('btn-run-' + phase).disabled = false;
                 document.getElementById('btn-stop-' + phase).style.display = 'none';
                 // Refresh dropdowns after process finishes (new result files may exist)
