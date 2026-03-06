@@ -306,6 +306,8 @@ def handle_run_phase(data):
             cmd.extend(["--poll-timeout", str(args["poll_timeout"])])
         if args.get("max_acu"):
             cmd.extend(["--max-acu", str(args["max_acu"])])
+        if args.get("auto_merge"):
+            cmd.append("--auto-merge")
 
     elif phase == "report":
         cmd.append("report")
