@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
+from datetime import datetime, timezone
 
 from src.api.client import DevinAPIClient, DevinAPIError
 from src.scanner.identifier import FeatureFlagScanner
@@ -121,10 +123,17 @@ def cmd_scan(args: argparse.Namespace) -> None:
             print(f"    - {item}")
     print("=" * 60)
 
-    if args.output:
-        with open(args.output, "w") as fh:
-            json.dump(results, fh, indent=2)
-        print(f"\nFull results written to {args.output}")
+    output_path = args.output or _default_output_path("scan")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as fh:
+        json.dump(results, fh, indent=2)
+    print(f"\nFull results written to {output_path}")
+
+
+def _default_output_path(prefix: str) -> str:
+    """Generate ``results/<prefix>_YYYYMMDD_HHMMSS.json``."""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return os.path.join("results", f"{prefix}_{ts}.json")
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
