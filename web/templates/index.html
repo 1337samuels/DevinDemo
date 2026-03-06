@@ -138,6 +138,16 @@
             opacity: 0.5;
         }
 
+        .form-group input.secret-loaded {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        .form-group input.secret-loaded::placeholder {
+            color: var(--green);
+            opacity: 0.8;
+        }
+
         .form-group select {
             appearance: none;
             -webkit-appearance: none;
@@ -335,6 +345,107 @@
             margin-bottom: 0.5rem;
             color: var(--yellow);
         }
+
+        /* Layer checkboxes */
+        .layer-checkboxes {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: repeat(4, auto);
+            grid-auto-flow: column;
+            gap: 0.5rem 2rem;
+        }
+
+        .layer-checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .layer-checkbox-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .layer-checkbox-row label {
+            font-size: 0.8125rem;
+            color: var(--text);
+            cursor: pointer;
+            text-transform: none;
+            letter-spacing: normal;
+            font-weight: 400;
+        }
+
+        .layer-checkbox-row label .layer-num {
+            color: var(--text-muted);
+            font-weight: 600;
+            margin-right: 0.25rem;
+        }
+
+        .layer-toggle-all {
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            text-decoration: underline;
+            font-family: inherit;
+        }
+
+        .layer-toggle-all:hover {
+            color: var(--accent-hover);
+        }
+
+        .layer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            grid-column: 1 / -1;
+        }
+
+        /* Collapsible additional options */
+        .collapsible-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            grid-column: 1 / -1;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.5rem 0.75rem;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+            margin-top: 0.25rem;
+        }
+
+        .collapsible-toggle:hover {
+            color: var(--text);
+            border-color: var(--accent);
+        }
+
+        .collapsible-toggle .arrow {
+            transition: transform 0.2s;
+            font-size: 0.625rem;
+        }
+
+        .collapsible-toggle.open .arrow {
+            transform: rotate(90deg);
+        }
+
+        .collapsible-content {
+            display: none;
+            grid-column: 1 / -1;
+        }
+
+        .collapsible-content.open {
+            display: contents;
+        }
     </style>
 </head>
 <body>
@@ -414,20 +525,6 @@
         <!-- Phase 2: Validate -->
         <div class="phase-panel" id="panel-validate">
             <div class="form-grid">
-                <div class="section-label">Devin API</div>
-                <div class="form-group">
-                    <label>API Key (v3) <span class="required">*</span></label>
-                    <input type="password" id="validate-api-key" placeholder="cog_..." />
-                </div>
-                <div class="form-group">
-                    <label>API Key (v1) <span class="required">*</span></label>
-                    <input type="password" id="validate-v1-api-key" placeholder="apk_..." />
-                </div>
-                <div class="form-group">
-                    <label>Organization ID <span class="required">*</span></label>
-                    <input type="text" id="validate-org-id" placeholder="org-..." />
-                </div>
-
                 <div class="section-label">Validation Configuration</div>
                 <div class="form-group">
                     <label>Input File (Phase 1 Scan Results) <span class="required">*</span></label>
@@ -440,39 +537,70 @@
                         </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Output File</label>
-                    <input type="text" id="validate-output" placeholder="Auto-generated if empty" />
+
+                <div class="layer-header">
+                    <div class="section-label" style="margin:0;">Validation Layers</div>
+                    <button type="button" class="layer-toggle-all" id="layer-toggle-all" onclick="toggleAllLayers()">Deselect All</button>
                 </div>
-                <div class="form-group">
-                    <label>Poll Interval (s)</label>
-                    <input type="number" id="validate-poll-interval" placeholder="15" />
-                </div>
-                <div class="form-group">
-                    <label>Poll Timeout (s)</label>
-                    <input type="number" id="validate-poll-timeout" placeholder="900" />
-                </div>
-                <div class="form-group">
-                    <label>Max ACU</label>
-                    <input type="number" id="validate-max-acu" placeholder="Optional" />
-                </div>
-                <div class="form-group">
-                    <label>Max Batch Size</label>
-                    <input type="number" id="validate-max-batch-size" placeholder="5" />
+                <div class="form-group full-width">
+                    <div class="layer-checkboxes" id="layer-checkboxes">
+                        <!-- Populated dynamically from /api/validation-layers -->
+                    </div>
                 </div>
 
-                <div class="section-label">Advanced Overrides</div>
-                <div class="form-group">
-                    <label>Staleness Days</label>
-                    <input type="number" id="validate-staleness-days" placeholder="365" />
-                </div>
-                <div class="form-group">
-                    <label>PR Lookback Days</label>
-                    <input type="number" id="validate-pr-lookback-days" placeholder="90" />
-                </div>
-                <div class="form-group">
-                    <label>Issue Lookback Days</label>
-                    <input type="number" id="validate-issue-lookback-days" placeholder="180" />
+                <button type="button" class="collapsible-toggle" id="validate-additional-toggle" onclick="toggleAdditionalOptions()">
+                    <span class="arrow">&#9654;</span> Additional Options
+                </button>
+                <div class="collapsible-content" id="validate-additional-content">
+                    <div class="section-label">Devin API</div>
+                    <div class="form-group">
+                        <label>API Key (v3) <span class="required">*</span></label>
+                        <input type="password" id="validate-api-key" placeholder="cog_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>API Key (v1) <span class="required">*</span></label>
+                        <input type="password" id="validate-v1-api-key" placeholder="apk_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Organization ID <span class="required">*</span></label>
+                        <input type="text" id="validate-org-id" placeholder="org-..." />
+                    </div>
+
+                    <div class="section-label">Output &amp; Polling</div>
+                    <div class="form-group">
+                        <label>Output File</label>
+                        <input type="text" id="validate-output" placeholder="Auto-generated if empty" />
+                    </div>
+                    <div class="form-group">
+                        <label>Poll Interval (s)</label>
+                        <input type="number" id="validate-poll-interval" placeholder="15" />
+                    </div>
+                    <div class="form-group">
+                        <label>Poll Timeout (s)</label>
+                        <input type="number" id="validate-poll-timeout" placeholder="900" />
+                    </div>
+                    <div class="form-group">
+                        <label>Max ACU</label>
+                        <input type="number" id="validate-max-acu" placeholder="Optional" />
+                    </div>
+                    <div class="form-group">
+                        <label>Max Batch Size</label>
+                        <input type="number" id="validate-max-batch-size" placeholder="5" />
+                    </div>
+
+                    <div class="section-label">Advanced Overrides</div>
+                    <div class="form-group">
+                        <label>Staleness Days</label>
+                        <input type="number" id="validate-staleness-days" placeholder="365" />
+                    </div>
+                    <div class="form-group">
+                        <label>PR Lookback Days</label>
+                        <input type="number" id="validate-pr-lookback-days" placeholder="90" />
+                    </div>
+                    <div class="form-group">
+                        <label>Issue Lookback Days</label>
+                        <input type="number" id="validate-issue-lookback-days" placeholder="180" />
+                    </div>
                 </div>
             </div>
 
@@ -589,6 +717,73 @@
 
         // Per-phase running state
         const phaseRunning = { scan: false, validate: false, cleanup: false, report: false };
+
+        // ----- Validation layer checkboxes -----
+
+        let allLayersSelected = true;
+
+        async function loadLayerCheckboxes() {
+            const container = document.getElementById('layer-checkboxes');
+            if (!container) return;
+            try {
+                const resp = await fetch('/api/validation-layers');
+                const layers = await resp.json();
+                container.innerHTML = '';
+                layers.forEach(function(layer) {
+                    const row = document.createElement('div');
+                    row.className = 'layer-checkbox-row';
+
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.id = 'layer-' + layer.number;
+                    cb.checked = true;
+                    cb.dataset.layerNumber = layer.number;
+                    cb.addEventListener('change', updateToggleAllLabel);
+
+                    const lbl = document.createElement('label');
+                    lbl.htmlFor = cb.id;
+                    lbl.innerHTML = '<span class="layer-num">' + layer.number + '.</span> ' + layer.label;
+
+                    row.appendChild(cb);
+                    row.appendChild(lbl);
+                    container.appendChild(row);
+                });
+            } catch (err) {
+                container.innerHTML = '<span style="color:var(--red);font-size:0.8rem;">Failed to load layers</span>';
+            }
+        }
+
+        function toggleAdditionalOptions() {
+            const toggle = document.getElementById('validate-additional-toggle');
+            const content = document.getElementById('validate-additional-content');
+            toggle.classList.toggle('open');
+            content.classList.toggle('open');
+        }
+
+        function toggleAllLayers() {
+            const checkboxes = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]');
+            allLayersSelected = !allLayersSelected;
+            checkboxes.forEach(function(cb) { cb.checked = allLayersSelected; });
+            updateToggleAllLabel();
+        }
+
+        function updateToggleAllLabel() {
+            const checkboxes = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]');
+            const allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
+            allLayersSelected = allChecked;
+            const btn = document.getElementById('layer-toggle-all');
+            if (btn) {
+                btn.textContent = allChecked ? 'Deselect All' : 'Select All';
+            }
+        }
+
+        function getSelectedLayers() {
+            const checkboxes = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]:checked');
+            const nums = Array.from(checkboxes).map(function(cb) { return cb.dataset.layerNumber; });
+            return nums.join(',');
+        }
+
+        loadLayerCheckboxes();
 
         // ----- File dropdown management -----
 
@@ -709,6 +904,28 @@
             consoleHomeParent[phase].appendChild(panel);
         }
 
+        // ----- Secrets auto-fill -----
+        // Track which fields have secrets loaded so runPhase can skip them
+        let secretFields = {};
+
+        async function loadSecrets() {
+            try {
+                const resp = await fetch('/api/secrets');
+                const data = await resp.json();
+                secretFields = data.field_map || {};
+                for (const [fieldId, loaded] of Object.entries(secretFields)) {
+                    const input = document.getElementById(fieldId);
+                    if (input && loaded) {
+                        input.placeholder = 'Found in secrets.txt';
+                        input.classList.add('secret-loaded');
+                    }
+                }
+            } catch (err) {
+                console.warn('Could not load secrets:', err);
+            }
+        }
+        loadSecrets();
+
         // ----- Tab switching -----
         document.querySelectorAll('.tab').forEach(function(tab) {
             tab.addEventListener('click', function() {
@@ -788,19 +1005,28 @@
 
             let args = {};
 
+            // Helper: check if a field is covered by secrets.txt
+            function hasSecret(fieldId) {
+                return !!secretFields[fieldId];
+            }
+
             if (phase === 'scan') {
                 const apiKey = getVal('scan-api-key');
                 const v1ApiKey = getVal('scan-v1-api-key');
                 const orgId = getVal('scan-org-id');
                 const repo = getVal('scan-repo');
-                if (!apiKey || !v1ApiKey || !orgId || !repo) {
+                // Only require manual input for fields NOT covered by secrets.txt
+                if ((!apiKey && !hasSecret('scan-api-key')) ||
+                    (!v1ApiKey && !hasSecret('scan-v1-api-key')) ||
+                    (!orgId && !hasSecret('scan-org-id')) ||
+                    !repo) {
                     alert('API Key (v3), API Key (v1), Organization ID, and Repository are required.');
                     return;
                 }
                 args = {
-                    api_key: apiKey,
-                    v1_api_key: v1ApiKey,
-                    org_id: orgId,
+                    api_key: apiKey || null,
+                    v1_api_key: v1ApiKey || null,
+                    org_id: orgId || null,
                     repo: repo,
                     output: getVal('scan-output') || null,
                     batch_size: getNumVal('scan-batch-size'),
@@ -813,14 +1039,25 @@
                 const v1ApiKey = getVal('validate-v1-api-key');
                 const orgId = getVal('validate-org-id');
                 const inputFile = getFilePath('validate-input');
-                if (!apiKey || !v1ApiKey || !orgId || !inputFile) {
+                if ((!apiKey && !hasSecret('validate-api-key')) ||
+                    (!v1ApiKey && !hasSecret('validate-v1-api-key')) ||
+                    (!orgId && !hasSecret('validate-org-id')) ||
+                    !inputFile) {
                     alert('API Key (v3), API Key (v1), Organization ID, and Input File are required.');
                     return;
                 }
+                const selectedLayers = getSelectedLayers();
+                if (!selectedLayers) {
+                    alert('At least one validation layer must be selected.');
+                    return;
+                }
+                // If all layers are selected, don't pass --layers (use default)
+                const totalLayers = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]').length;
+                const checkedCount = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]:checked').length;
                 args = {
-                    api_key: apiKey,
-                    v1_api_key: v1ApiKey,
-                    org_id: orgId,
+                    api_key: apiKey || null,
+                    v1_api_key: v1ApiKey || null,
+                    org_id: orgId || null,
                     input_file: inputFile,
                     output: getVal('validate-output') || null,
                     poll_interval: getNumVal('validate-poll-interval'),
@@ -830,6 +1067,7 @@
                     staleness_days: getNumVal('validate-staleness-days'),
                     pr_lookback_days: getNumVal('validate-pr-lookback-days'),
                     issue_lookback_days: getNumVal('validate-issue-lookback-days'),
+                    layers: (checkedCount < totalLayers) ? selectedLayers : null,
                 };
             } else if (phase === 'cleanup') {
                 const apiKey = getVal('scan-api-key');
