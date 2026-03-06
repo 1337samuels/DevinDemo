@@ -62,6 +62,11 @@ _DB_PROPERTIES: dict[str, dict[str, Any]] = {
             ]
         }
     },
+    "Validation Count": {"number": {"format": "number"}},
+    # PR fields (empty for now, filled when Phase 3 data is available)
+    "PR Opened": {"checkbox": {}},
+    "PR URL": {"url": {}},
+    # Remaining columns
     "Summary": {"rich_text": {}},
     # 8 layer checkboxes
     "Layer 1: Re-Confirm": {"checkbox": {}},
@@ -72,10 +77,6 @@ _DB_PROPERTIES: dict[str, dict[str, Any]] = {
     "Layer 6: Test Coverage": {"checkbox": {}},
     "Layer 7: Runtime Signals": {"checkbox": {}},
     "Layer 8: External Consumers": {"checkbox": {}},
-    "Validation Count": {"number": {"format": "number"}},
-    # PR fields (empty for now, filled when Phase 3 data is available)
-    "PR Opened": {"checkbox": {}},
-    "PR URL": {"url": {}},
     "Code Snippet": {"rich_text": {}},
     "Detection Reasoning": {"rich_text": {}},
 }
