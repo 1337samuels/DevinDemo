@@ -835,33 +835,54 @@ def _candidate_sort_key(candidate: dict[str, Any]) -> str:
     return parts[0] if len(parts) > 1 else ""
 
 
+def _escape_braces(text: str) -> str:
+    """Escape ``{`` and ``}`` so they survive ``str.format()``."""
+    return text.replace("{", "{{").replace("}", "}}")
+
+
 def _format_candidate_block(
     candidates: list[dict[str, Any]], category_label: str
 ) -> str:
-    """Format a list of candidates into the block that goes into the prompt."""
+    """Format a list of candidates into the block that goes into the prompt.
+
+    All candidate-supplied text (code snippets, reasoning, flag names, etc.)
+    is brace-escaped so that a subsequent ``str.format()`` call on the
+    prompt template does not misinterpret Python dicts, f-strings, or JS
+    objects as format placeholders.
+    """
     lines: list[str] = []
     for i, cand in enumerate(candidates, 1):
         lines.append(f"### Candidate {i}")
-        lines.append(f"- **ID:** {cand.get('id', 'unknown')}")
-        lines.append(f"- **Category:** {category_label}")
-        lines.append(f"- **File:** {cand.get('file', 'unknown')}")
+        lines.append(f"- **ID:** {_escape_braces(str(cand.get('id', 'unknown')))}")
+        lines.append(f"- **Category:** {_escape_braces(category_label)}")
+        lines.append(f"- **File:** {_escape_braces(str(cand.get('file', 'unknown')))}")
         lines.append(f"- **Line:** {cand.get('line', 'unknown')}")
 
         # Include type-specific fields
         if "flag_name" in cand:
-            lines.append(f"- **Flag/Symbol name:** {cand['flag_name']}")
+            lines.append(
+                f"- **Flag/Symbol name:** {_escape_braces(cand['flag_name'])}"
+            )
         if "pattern_type" in cand:
-            lines.append(f"- **Pattern type:** {cand['pattern_type']}")
+            lines.append(
+                f"- **Pattern type:** {_escape_braces(cand['pattern_type'])}"
+            )
         if "category" in cand:
-            lines.append(f"- **Sub-category:** {cand['category']}")
+            lines.append(
+                f"- **Sub-category:** {_escape_braces(cand['category'])}"
+            )
 
         snippet = cand.get("code_snippet", "")
         if snippet:
-            lines.append(f"- **Code snippet:**\n```\n{snippet}\n```")
+            lines.append(
+                f"- **Code snippet:**\n```\n{_escape_braces(snippet)}\n```"
+            )
 
         reasoning = cand.get("reasoning", "")
         if reasoning:
-            lines.append(f"- **Detection reasoning:** {reasoning}")
+            lines.append(
+                f"- **Detection reasoning:** {_escape_braces(reasoning)}"
+            )
 
         lines.append("")
     return "\n".join(lines)
