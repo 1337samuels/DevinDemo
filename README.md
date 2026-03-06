@@ -27,7 +27,15 @@ has four stages:
 - A Devin **service user** API key (starts with `cog_`) — create one in **Settings > Service users**
 - Your Devin **organization ID** (starts with `org-`) — find it in **Settings > General**
 
-> **Note:** Legacy keys (`apk_user_*`, `apk_*`) do **not** work with the v3 API.
+### Authentication
+
+| Script / Tool       | Key type                                  | Where to create                           |
+|---------------------|-------------------------------------------|-------------------------------------------|
+| `main.py` (scanner) | Service user key (`cog_*`)               | **Settings > Service users**              |
+| `list_sessions.py`  | Service user key (`cog_*`)               | **Settings > Service users**              |
+| `send_message.py`   | Personal key (`apk_user_*`) or Service key (`apk_*`) | **Settings > API keys** |
+
+> **Note:** `cog_*` keys do **not** work with the v1 API, and `apk_*` / `apk_user_*` keys do **not** work with the v3 API.
 > See the [authentication docs](https://docs.devin.ai/api-reference/authentication) for details.
 
 ## Quick start
@@ -41,6 +49,8 @@ python main.py --api-key <YOUR_COG_KEY> --org-id <YOUR_ORG_ID> scan owner/repo
 ```
 
 ## Usage
+
+### main.py (scanner)
 
 ```bash
 python main.py --api-key <KEY> --org-id <ORG_ID> <command> [options]
@@ -75,7 +85,7 @@ python main.py --api-key <KEY> --org-id <ORG_ID> scan owner/repo [options]
 
 #### `report` — Publish tech-debt report (Part 4) — *not yet implemented*
 
-### Examples
+#### Examples
 
 Scan a repository and print results to stdout:
 
@@ -93,7 +103,33 @@ The output JSON from Part 1 is the input for Part 2.  Each finding has a unique
 `id` and a `verification_status` field (initially `"unverified"`) that Part 2
 will update to `"verified"`, `"false_positive"`, or `"needs_review"`.
 
+### send_message.py
+
+A v1 API workaround for **Teams accounts** that cannot use the v3 `send_message` endpoint.
+
+```bash
+python send_message.py <YOUR_DEVIN_API_KEY> <SESSION_ID> "<MESSAGE>"
+```
+
+#### Required arguments
+
+| Argument       | Description                                                                          |
+|----------------|--------------------------------------------------------------------------------------|
+| `api_key`      | Your Devin API key (`apk_user_*` or `apk_*`)                                        |
+| `session_id`   | The ID of the session to send the message to                                         |
+| `message`      | The message text to send to Devin                                                    |
+
+#### Examples
+
+Send a message to a running session:
+
+```bash
+python send_message.py apk_user_your_key_here abc-123-def-456 "Please also add unit tests"
+```
+
 ## Sample output
+
+### Scanner (main.py)
 
 ```
 [scanner] Creating Devin session to scan myorg/myrepo …
@@ -116,6 +152,13 @@ SCAN SUMMARY
     - ENABLE_LEGACY_AUTH flag in src/auth.py:42 — always True, dead else branch
     - 3 unused imports in src/utils.py
 ============================================================
+```
+
+### send_message.py
+
+```
+Sending message to session abc-123-def-456 ...
+Message sent successfully.
 ```
 
 ### Output JSON structure
@@ -151,6 +194,12 @@ Each finding includes fields for Part 2 hand-off:
 Part 2 will iterate through each finding by `id`, perform deep verification,
 and update `verification_status` accordingly.
 
+## Why use the v1 API for sending messages?
+
+The v3 API's `send_message` endpoint requires the `ManageOrgSessions` permission, which is only available to **Enterprise** accounts with `cog_*` service user keys.
+
+If you have a **Teams** account, you can use the [v1 `send_message` endpoint](https://docs.devin.ai/api-reference/v1/sessions/send-a-message-to-an-existing-devin-session) instead. It accepts Personal API Keys (`apk_user_*`) and Service API Keys (`apk_*`), which are available on all account tiers. The `send_message.py` script wraps this endpoint for convenience.
+
 ## Project structure
 
 ```
@@ -158,6 +207,7 @@ DevinDemo/
 ├── main.py                     # CLI entrypoint
 ├── requirements.txt
 ├── list_sessions.py            # Standalone Devin API session lister (utility)
+├── send_message.py             # v1 API message sender (Teams workaround)
 ├── src/
 │   ├── api/
 │   │   └── client.py           # Devin v3 API client wrapper
