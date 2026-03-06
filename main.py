@@ -15,12 +15,13 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.api.client import DevinAPIClient, DevinAPIError
 from src.cleanup.cleanup import CleanupPRGenerator
 from src.reporter.reporter import DebtReporter
 from src.scanner.identifier import FeatureFlagScanner
-from src.validator.validator import LegacyCodeValidator
+from src.validator.validator import ALL_LAYER_NUMBERS, LAYER_LABELS, LegacyCodeValidator
 
 
 class ProgressTracker:
@@ -204,7 +205,14 @@ def cmd_validate(args: argparse.Namespace) -> None:
     if args.issue_lookback_days is not None:
         config["issue_lookback_days"] = args.issue_lookback_days
 
-    validator = LegacyCodeValidator(client, config=config if config else None)
+    # Parse selected layers
+    selected_layers = None
+    if args.layers is not None:
+        selected_layers = args.layers
+
+    validator = LegacyCodeValidator(
+        client, config=config if config else None, selected_layers=selected_layers
+    )
 
     try:
         results = validator.validate(
@@ -372,33 +380,101 @@ def cmd_report(args: argparse.Namespace) -> None:
             json.dump(result, fh, indent=2)
         print(f"\nReport metadata written to {args.output}")
 
-    # Print the Notion database ID if one was created/used
+    # Print the Notion database ID and link if one was created/used
     db_id = result.get("notion_database_id")
     if db_id:
         print(f"\nNotion database ID: {db_id}")
         print("Save this ID for future runs with --notion-database-id.")
+        # Notion URLs use the ID without dashes
+        clean_id = db_id.replace("-", "")
+        print(f"View in Notion: https://www.notion.so/{clean_id}")
 
 
-def _add_devin_api_args(parser: argparse.ArgumentParser) -> None:
-    """Add --api-key and --org-id arguments to a subparser (phases 1-3)."""
+# ---------------------------------------------------------------------------
+# secrets.txt loader
+# ---------------------------------------------------------------------------
+
+# Resolve secrets.txt relative to this script's directory (i.e. the repo root)
+# so it works regardless of the caller's current working directory.
+_REPO_DIR = Path(__file__).resolve().parent
+_SECRETS_FILE = "secrets.txt"
+_SECRETS_PATH = _REPO_DIR / _SECRETS_FILE
+
+# Maps secrets.txt key -> (argparse dest, applicable commands)
+_SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
+    "API_V3_KEY": ("api_key", {"scan", "validate", "cleanup"}),
+    "API_V1_KEY": ("v1_api_key", {"scan", "validate", "cleanup"}),
+    "ORG_ID": ("org_id", {"scan", "validate", "cleanup"}),
+    "NOTION_SECRET": ("notion_api_key", {"report"}),
+    "NOTION_MASTER_PAGE_ID": ("notion_parent_page_id", {"report"}),
+}
+
+
+def _load_secrets(path: Path = _SECRETS_PATH) -> dict[str, str]:
+    """Parse a ``secrets.txt`` file and return a ``{KEY: value}`` dict.
+
+    Each line is expected to be ``KEY = "value"`` (or ``KEY = value``).
+    Blank lines and lines without ``=`` are silently skipped.
+
+    By default the file is looked up next to ``main.py`` (the repo root),
+    **not** relative to the caller's working directory.
+    """
+    secrets: dict[str, str] = {}
+    if not path.is_file():
+        return secrets
+
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and value:
+            secrets[key] = value
+
+    return secrets
+
+
+def _get_secret(secrets: dict[str, str], key: str) -> str | None:
+    """Return the value for *key* from the secrets dict, or ``None``."""
+    return secrets.get(key)
+
+
+def _add_devin_api_args(
+    parser: argparse.ArgumentParser,
+    secrets: dict[str, str],
+) -> None:
+    """Add --api-key and --org-id arguments to a subparser (phases 1-3).
+
+    Defaults are pre-populated from ``secrets.txt`` when available so that
+    the user doesn't need to pass them on every invocation.
+    """
     parser.add_argument(
         "--api-key",
-        required=True,
+        default=_get_secret(secrets, "API_V3_KEY"),
         help="Devin service user API key (starts with cog_) for the v3 API.",
     )
     parser.add_argument(
         "--v1-api-key",
-        required=True,
+        default=_get_secret(secrets, "API_V1_KEY"),
         help="Devin legacy API key (starts with apk_) for v1 send_message.",
     )
     parser.add_argument(
         "--org-id",
-        required=True,
+        default=_get_secret(secrets, "ORG_ID"),
         help="Devin organization ID (starts with org-).",
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Load secrets once, up front, so every subparser can use them as defaults.
+    secrets = _load_secrets()
+    if secrets:
+        loaded_keys = [k for k in _SECRETS_MAP if k in secrets]
+        if loaded_keys:
+            print(f"[secrets] Loaded from {_SECRETS_FILE}: {', '.join(loaded_keys)}")
+
     parser = argparse.ArgumentParser(
         description="Devin-powered feature-flag & tech-debt scanner.",
     )
@@ -407,7 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ---- scan (Part 1) ----
     scan_p = subparsers.add_parser("scan", help="Identify feature flags & tech debt.")
-    _add_devin_api_args(scan_p)
+    _add_devin_api_args(scan_p, secrets)
     scan_p.add_argument("repo", help="GitHub repo in owner/repo format.")
     scan_p.add_argument("--output", "-o", help="Write full JSON results to this file.")
     scan_p.add_argument(
@@ -440,7 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_p = subparsers.add_parser(
         "validate", help="Validate identified findings via 8-layer analysis."
     )
-    _add_devin_api_args(validate_p)
+    _add_devin_api_args(validate_p, secrets)
     validate_p.add_argument(
         "input",
         help="Path to the Part 1 JSON results file.",
@@ -491,6 +567,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override issue lookback period in days (default: 180).",
     )
+
+    # Build layer choices help text
+    layer_help_parts = [f"{n}: {LAYER_LABELS[n]}" for n in ALL_LAYER_NUMBERS]
+    validate_p.add_argument(
+        "--layers",
+        type=lambda s: [int(x.strip()) for x in s.split(",")],
+        default=None,
+        help=(
+            "Comma-separated list of validation layer numbers to run "
+            "(default: all). Choices: " + "; ".join(layer_help_parts) + "."
+        ),
+    )
     validate_p.set_defaults(func=cmd_validate)
 
     # ---- cleanup (Part 3) ----
@@ -498,7 +586,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cleanup",
         help="Generate cleanup PRs for HIGH-confidence findings.",
     )
-    _add_devin_api_args(cleanup_p)
+    _add_devin_api_args(cleanup_p, secrets)
     cleanup_p.add_argument(
         "input",
         help="Path to the Phase 2 validated findings JSON file.",
@@ -546,6 +634,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument(
         "--notion-api-key",
+        default=_get_secret(secrets, "NOTION_SECRET"),
         help="Notion integration API token.",
     )
     report_p.add_argument(
@@ -557,6 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument(
         "--notion-parent-page-id",
+        default=_get_secret(secrets, "NOTION_MASTER_PAGE_ID"),
         help=(
             "Notion page ID under which to create a new database "
             "(required on first run if --notion-database-id is not set)."
@@ -571,9 +661,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Required Devin API args per phase (validated after secrets are applied)
+_REQUIRED_DEVIN_ARGS = {"scan", "validate", "cleanup"}
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    # Enforce required Devin API credentials for phases 1-3
+    if args.command in _REQUIRED_DEVIN_ARGS:
+        missing = []
+        if not args.api_key:
+            missing.append("--api-key")
+        if not args.v1_api_key:
+            missing.append("--v1-api-key")
+        if not args.org_id:
+            missing.append("--org-id")
+        if missing:
+            parser.error(
+                f"{', '.join(missing)} required for '{args.command}'. "
+                f"Provide via CLI flags or create a {_SECRETS_FILE} file."
+            )
+
     args.func(args)
 
 

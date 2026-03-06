@@ -9,9 +9,18 @@ import re
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 from flask import Flask, jsonify, render_template
 from flask_socketio import SocketIO, emit
+
+# Ensure the project root is on sys.path so ``from src.…`` works even when
+# this file is executed directly (e.g. ``python web/app.py``).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from src.validator.validator import ALL_LAYER_NUMBERS, LAYER_LABELS  # noqa: E402
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "devindemo-gui"
@@ -21,9 +30,12 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 _current_process: subprocess.Popen | None = None
 _process_lock = threading.Lock()
 
-# Path to the project root (one level up from web/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = _PROJECT_ROOT
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+
+# Import secrets loader from main.py so web GUI can check for loaded secrets
+sys.path.insert(0, PROJECT_ROOT)
+from main import _load_secrets, _SECRETS_MAP  # noqa: E402
 
 # Regex to parse default output filenames: <prefix>_YYYYMMDD_HHMMSS.json
 _FILENAME_RE = re.compile(
@@ -85,6 +97,41 @@ def _discover_result_files(prefix: str) -> list[dict]:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/secrets")
+def api_secrets():
+    """Return which secret keys were found in secrets.txt.
+
+    Response: {"loaded_keys": ["API_V3_KEY", ...], "field_map": {"scan-api-key": true, ...}}
+    The field_map maps HTML input IDs to a boolean indicating the secret is available.
+    """
+    secrets = _load_secrets(Path(PROJECT_ROOT) / "secrets.txt")
+    loaded_keys = [k for k in _SECRETS_MAP if k in secrets]
+
+    # Map secrets.txt keys to the HTML input element IDs they correspond to
+    _KEY_TO_FIELDS: dict[str, list[str]] = {
+        "API_V3_KEY": ["scan-api-key", "validate-api-key"],
+        "API_V1_KEY": ["scan-v1-api-key", "validate-v1-api-key"],
+        "ORG_ID": ["scan-org-id", "validate-org-id"],
+        "NOTION_SECRET": ["report-notion-api-key"],
+        "NOTION_MASTER_PAGE_ID": ["report-notion-parent-page-id"],
+    }
+    field_map: dict[str, bool] = {}
+    for key in loaded_keys:
+        for field_id in _KEY_TO_FIELDS.get(key, []):
+            field_map[field_id] = True
+
+    return jsonify({"loaded_keys": loaded_keys, "field_map": field_map})
+
+
+@app.route("/api/validation-layers")
+def api_validation_layers():
+    """Return the available validation layers with labels."""
+    return jsonify([
+        {"number": n, "label": LAYER_LABELS[n]}
+        for n in ALL_LAYER_NUMBERS
+    ])
 
 
 @app.route("/api/results/<prefix>")
@@ -236,6 +283,8 @@ def handle_run_phase(data):
             cmd.extend(["--pr-lookback-days", str(args["pr_lookback_days"])])
         if args.get("issue_lookback_days"):
             cmd.extend(["--issue-lookback-days", str(args["issue_lookback_days"])])
+        if args.get("layers"):
+            cmd.extend(["--layers", args["layers"]])
 
     elif phase == "cleanup":
         cmd.append("cleanup")
