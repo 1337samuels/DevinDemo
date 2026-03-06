@@ -1,13 +1,14 @@
 """Part 1 — Identify feature flags, dead code, and tech debt.
 
-Uses a single Devin session with multiple prompts:
+Uses multiple Devin sessions with a two-phase approach:
 
-1. **Discovery prompt** — the initial session prompt asks Devin to list
-   every ``.py`` file in the repository.
-2. **Batch scan prompts** — follow-up messages in the same session instruct
-   Devin to scan batches of files.  This gives the caller precise progress
-   tracking (batch N/M, X/Y files, Z%) without the overhead of creating
-   multiple sessions.
+1. **Discovery session** — a lightweight session asks Devin to list every
+   ``.py`` file in the repository.
+2. **Batch scan sessions** — one session per batch of files, each instructed
+   to scan its batch and return findings.  This gives the caller precise
+   progress tracking (batch N/M, X/Y files, Z%) between sessions.
+
+Each session is archived after it completes so no "ghost" sessions linger.
 """
 
 from __future__ import annotations
@@ -35,7 +36,9 @@ Once you have the list, respond with **only** a JSON block like this (no other t
 Do NOT scan or analyse the file contents yet — just list them.
 """
 
-_BATCH_SCAN_PROMPT = """Now scan **only** the following Python files:
+_BATCH_SCAN_PROMPT = """You are a code-quality scanner for the repository **{repo}**.
+
+Scan **only** the following Python files:
 
 {file_list}
 
@@ -285,7 +288,7 @@ def _enrich_results(
         summary["total_files"] = total_files
     return {
         "meta": {
-            "scanner_version": "1.2.0",
+            "scanner_version": "1.3.0",
             "scan_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "session_id": session_id,
             "repo": repo,
@@ -359,13 +362,15 @@ OnProgressCallback = Callable[[int, int, int, int, dict[str, Any] | None], None]
 class FeatureFlagScanner:
     """Scan a repository for feature flags, dead code, and tech debt.
 
-    Uses a **single Devin session** with multiple prompts:
+    Uses **separate Devin sessions** in a two-phase approach:
 
-    1. **Discovery** — the initial prompt asks Devin to list all ``.py``
+    1. **Discovery session** — a lightweight session lists all ``.py``
        files in the repo.
-    2. **Batch scans** — follow-up messages in the same session instruct
-       Devin to scan batches of files.  The caller gets precise progress
-       tracking between batches.
+    2. **Batch scan sessions** — one session per batch of files, each
+       returning its findings.  The caller gets precise progress tracking
+       between batches.
+
+    Each session is archived after it completes to avoid ghost sessions.
     """
 
     DEFAULT_BATCH_SIZE = 10
@@ -389,15 +394,15 @@ class FeatureFlagScanner:
     ) -> dict[str, Any]:
         """Run the full scan and return enriched results.
 
-        Creates a single Devin session, sends a discovery prompt first,
-        then sends batch scan prompts as follow-up messages.
+        Creates a discovery session first, then one session per batch
+        of files.
 
         Args:
             repo: GitHub repository in ``owner/repo`` format.
-            batch_size: Max files per batch prompt (default 10).
+            batch_size: Max files per batch session (default 10).
             poll_interval: Seconds between status polls (default 15).
-            poll_timeout: Max seconds to wait per prompt (default 900).
-            max_acu_limit: Optional ACU cap for the session.
+            poll_timeout: Max seconds to wait per session (default 900).
+            max_acu_limit: Optional ACU cap per session.
             on_progress: Optional callback invoked between batches:
                 ``(done_files, total_files, batch_idx, total_batches,
                 session_or_None)``.
@@ -408,53 +413,20 @@ class FeatureFlagScanner:
         if batch_size is None:
             batch_size = self.DEFAULT_BATCH_SIZE
 
-        # ---- Create session with a neutral setup prompt ----
-        # We intentionally do NOT pass structured_output_schema here
-        # because the schema describes scan results and would cause
-        # Devin to start scanning files immediately instead of just
-        # listing them.  All results are extracted from message text.
-        setup_prompt = (
-            f"You are a code-quality scanning assistant for the "
-            f"repository **{repo}**.  Wait for my instructions "
-            f"before doing anything."
-        )
+        # ---- Phase 1: Discovery session ----
+        print(f"[scanner] Phase 1: discovering .py files in {repo} ...")
+        discovery_prompt = _DISCOVERY_PROMPT.format(repo=repo)
 
-        print(f"[scanner] Creating session for {repo} ...")
-        session = self._client.create_session(
-            prompt=setup_prompt,
+        discovery_session = self._client.create_session(
+            prompt=discovery_prompt,
             repos=[repo],
-            tags=["feature-flag-scan", "automated"],
-            title=f"Code scan: {repo}",
+            tags=["feature-flag-scan", "discovery", "automated"],
+            title=f"File discovery: {repo}",
             max_acu_limit=max_acu_limit,
         )
-        session_id = session["session_id"]
-        print(f"[scanner] Session: {session_id}")
-        print(f"[scanner] URL: {session.get('url', '')}")
-
-        # Wait for session to be ready (claimed / waiting_for_user)
-        print("[scanner] Waiting for session to initialise ...")
-        phase0_start = time.monotonic()
-
-        def _setup_status(sess: dict[str, Any]) -> None:
-            elapsed = time.monotonic() - phase0_start
-            status = sess.get("status", "")
-            detail = sess.get("status_detail", "")
-            print(
-                f"  [{_fmt_elapsed(elapsed)}] {status}"
-                f" ({detail})  | Initialising session ..."
-            )
-
-        self._client.poll_session(
-            session_id,
-            interval=poll_interval,
-            timeout=poll_timeout,
-            on_update=_setup_status,
-        )
-
-        # ---- Phase 1: Send discovery prompt ----
-        print("[scanner] Phase 1: discovering .py files ...")
-        discovery_prompt = _DISCOVERY_PROMPT.format(repo=repo)
-        self._client.send_message(session_id, discovery_prompt)
+        discovery_id = discovery_session["session_id"]
+        print(f"[scanner] Discovery session: {discovery_id}")
+        print(f"[scanner] URL: {discovery_session.get('url', '')}")
 
         phase1_start = time.monotonic()
 
@@ -467,14 +439,18 @@ class FeatureFlagScanner:
                 f" ({detail})  | Phase 1: listing files ..."
             )
 
-        final = self._client.poll_session(
-            session_id,
+        final_discovery = self._client.poll_session(
+            discovery_id,
             interval=poll_interval,
             timeout=poll_timeout,
             on_update=_discovery_status,
         )
 
-        file_list = self._parse_discovery_response(final)
+        # Archive the discovery session
+        print("[scanner] Archiving discovery session ...")
+        self._client.archive_session(discovery_id)
+
+        file_list = self._parse_discovery_response(final_discovery)
         total_files = len(file_list)
         print(f"[scanner] Discovery complete: {total_files} .py files found.")
 
@@ -494,12 +470,12 @@ class FeatureFlagScanner:
                         "high_priority_items": [],
                     },
                 },
-                session_id=session_id,
+                session_id=discovery_id,
                 repo=repo,
                 total_files=0,
             )
 
-        # ---- Phase 2: Send batch scan prompts ----
+        # ---- Phase 2: Batch scan sessions ----
         batches = _chunk_list(file_list, batch_size)
         total_batches = len(batches)
         print(
@@ -515,6 +491,7 @@ class FeatureFlagScanner:
         all_debt: list[dict[str, Any]] = []
         all_high_pri: list[str] = []
         files_done = 0
+        last_session_id = discovery_id
 
         for batch_idx, batch_files in enumerate(batches, start=1):
             print(
@@ -522,14 +499,26 @@ class FeatureFlagScanner:
                 f"({len(batch_files)} files) ---"
             )
 
-            # Send batch scan prompt as a follow-up message
+            # Build the batch scan prompt
             file_list_str = "\n".join(f"- ``{f}``" for f in batch_files)
             batch_prompt = _BATCH_SCAN_PROMPT.format(
                 repo=repo, file_list=file_list_str, file_count=len(batch_files)
             )
-            self._client.send_message(session_id, batch_prompt)
 
-            # Wait for Devin to finish processing this batch
+            # Create a new session for this batch
+            batch_session = self._client.create_session(
+                prompt=batch_prompt,
+                repos=[repo],
+                structured_output_schema=SCAN_OUTPUT_SCHEMA,
+                tags=["feature-flag-scan", f"batch-{batch_idx}", "automated"],
+                title=f"Batch {batch_idx}/{total_batches}: {repo}",
+                max_acu_limit=max_acu_limit,
+            )
+            batch_session_id = batch_session["session_id"]
+            last_session_id = batch_session_id
+            print(f"[scanner] Batch session: {batch_session_id}")
+
+            # Poll this batch session with per-poll status logging
             batch_start = time.monotonic()
 
             def _batch_status(
@@ -552,13 +541,17 @@ class FeatureFlagScanner:
                 )
 
             batch_final = self._client.poll_session(
-                session_id,
+                batch_session_id,
                 interval=poll_interval,
                 timeout=poll_timeout,
                 on_update=_batch_status,
             )
 
-            # Try to extract batch results from structured output
+            # Archive this batch session
+            print(f"[scanner] Archiving batch {batch_idx} session ...")
+            self._client.archive_session(batch_session_id)
+
+            # Extract batch results
             batch_result = self._parse_batch_response(batch_final)
 
             # Accumulate findings
@@ -591,14 +584,10 @@ class FeatureFlagScanner:
 
         enriched = _enrich_results(
             combined,
-            session_id=session_id,
+            session_id=last_session_id,
             repo=repo,
             total_files=total_files,
         )
-
-        # ---- Archive the session so it doesn't linger ----
-        print("[scanner] Archiving session ...")
-        self._client.archive_session(session_id)
 
         print("\n[scanner] All batches complete. Results:")
         print(json.dumps(enriched, indent=2))
