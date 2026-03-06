@@ -490,7 +490,8 @@ class FeatureFlagScanner:
 
         if total_files == 0:
             print("[scanner] No .py files found — nothing to scan.")
-            self._client.archive_session(session_id)
+            print("[scanner] Sending session to sleep ...")
+            self._client.send_message(session_id, "sleep")
             return _enrich_results(
                 {
                     "repo": repo,
@@ -609,9 +610,9 @@ class FeatureFlagScanner:
             total_files=total_files,
         )
 
-        # ---- Archive the session so it doesn't linger ----
-        print("[scanner] Archiving session ...")
-        self._client.archive_session(session_id)
+        # ---- Put the session to sleep so it doesn't linger ----
+        print("[scanner] Sending session to sleep ...")
+        self._client.send_message(session_id, "sleep")
 
         print("\n[scanner] All batches complete. Results:")
         print(json.dumps(enriched, indent=2))
