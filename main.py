@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timezone
 
 from src.api.client import DevinAPIClient, DevinAPIError
+from src.reporter.reporter import DebtReporter
 from src.scanner.identifier import FeatureFlagScanner
 from src.validator.validator import LegacyCodeValidator
 
@@ -237,17 +238,60 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
 
 
 def cmd_report(args: argparse.Namespace) -> None:
-    """Publish a report (Part 4) — not yet implemented."""
-    print("Reporting is not yet implemented.", file=sys.stderr)
-    sys.exit(1)
+    """Publish validated findings to Notion and/or Slack (Part 4)."""
+    # Load Phase 2 validated findings
+    try:
+        with open(args.input, "r") as fh:
+            findings = json.load(fh)
+    except FileNotFoundError:
+        print(f"Input file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as exc:
+        print(f"Invalid JSON in {args.input}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
+    # Load optional Phase 3 cleanup results
+    cleanup_results: list[dict] | None = None
+    if args.cleanup_results:
+        try:
+            with open(args.cleanup_results, "r") as fh:
+                cleanup_results = json.load(fh)
+        except FileNotFoundError:
+            print(
+                f"Cleanup results file not found: {args.cleanup_results}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        except json.JSONDecodeError as exc:
+            print(
+                f"Invalid JSON in {args.cleanup_results}: {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Devin-powered feature-flag & tech-debt scanner.",
+    reporter = DebtReporter(
+        notion_api_key=args.notion_api_key,
+        notion_database_id=args.notion_database_id,
+        notion_parent_page_id=args.notion_parent_page_id,
+        slack_webhook_url=args.slack_webhook_url,
     )
 
-    # ---- shared arguments ----
+    result = reporter.report(findings, cleanup_results)
+
+    if args.output:
+        with open(args.output, "w") as fh:
+            json.dump(result, fh, indent=2)
+        print(f"\nReport metadata written to {args.output}")
+
+    # Print the Notion database ID if one was created/used
+    db_id = result.get("notion_database_id")
+    if db_id:
+        print(f"\nNotion database ID: {db_id}")
+        print("Save this ID for future runs with --notion-database-id.")
+
+
+def _add_devin_api_args(parser: argparse.ArgumentParser) -> None:
+    """Add --api-key and --org-id arguments to a subparser (phases 1-3)."""
     parser.add_argument(
         "--api-key",
         required=True,
@@ -264,10 +308,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Devin organization ID (starts with org-).",
     )
 
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Devin-powered feature-flag & tech-debt scanner.",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # ---- scan (Part 1) ----
     scan_p = subparsers.add_parser("scan", help="Identify feature flags & tech debt.")
+    _add_devin_api_args(scan_p)
     scan_p.add_argument("repo", help="GitHub repo in owner/repo format.")
     scan_p.add_argument("--output", "-o", help="Write full JSON results to this file.")
     scan_p.add_argument(
@@ -300,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_p = subparsers.add_parser(
         "validate", help="Validate identified findings via 8-layer analysis."
     )
+    _add_devin_api_args(validate_p)
     validate_p.add_argument(
         "input",
         help="Path to the Part 1 JSON results file.",
@@ -356,11 +408,47 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup_p = subparsers.add_parser(
         "cleanup", help="[NOT YET IMPLEMENTED] Generate cleanup PRs."
     )
+    _add_devin_api_args(cleanup_p)
     cleanup_p.set_defaults(func=cmd_cleanup)
 
-    # ---- report (Part 4 — stub) ----
+    # ---- report (Part 4) ----
     report_p = subparsers.add_parser(
-        "report", help="[NOT YET IMPLEMENTED] Publish a tech-debt report."
+        "report", help="Publish validated findings to Notion / Slack."
+    )
+    report_p.add_argument(
+        "--input", "-i",
+        required=True,
+        help="Path to the Phase 2 validated findings JSON file.",
+    )
+    report_p.add_argument(
+        "--output", "-o",
+        help="Write report metadata JSON to this file.",
+    )
+    report_p.add_argument(
+        "--cleanup-results",
+        help="Path to Phase 3 cleanup results JSON (optional).",
+    )
+    report_p.add_argument(
+        "--notion-api-key",
+        help="Notion integration API token.",
+    )
+    report_p.add_argument(
+        "--notion-database-id",
+        help=(
+            "Existing Notion database ID. If omitted, a new database is "
+            "created under --notion-parent-page-id."
+        ),
+    )
+    report_p.add_argument(
+        "--notion-parent-page-id",
+        help=(
+            "Notion page ID under which to create a new database "
+            "(required on first run if --notion-database-id is not set)."
+        ),
+    )
+    report_p.add_argument(
+        "--slack-webhook-url",
+        help="Slack incoming webhook URL for PR notifications.",
     )
     report_p.set_defaults(func=cmd_report)
 
