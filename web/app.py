@@ -27,11 +27,33 @@ def index():
     return render_template("index.html")
 
 
+# Keys/secrets that should be masked in console output
+_SECRET_FLAGS = {
+    "--api-key", "--v1-api-key", "--notion-api-key", "--slack-webhook-url",
+}
+
+
+def _mask_cmd(cmd: list[str]) -> str:
+    """Return a display-safe version of *cmd* with secret values masked."""
+    parts: list[str] = []
+    mask_next = False
+    for token in cmd:
+        if mask_next:
+            parts.append("****")
+            mask_next = False
+        elif token in _SECRET_FLAGS:
+            parts.append(token)
+            mask_next = True
+        else:
+            parts.append(token)
+    return " ".join(parts)
+
+
 def _stream_process(cmd: list[str], sid: str) -> None:
     """Run a subprocess and stream its stdout/stderr to the client via SocketIO."""
     global _current_process
 
-    socketio.emit("console_output", {"data": f"$ {' '.join(cmd)}\n"}, to=sid)
+    socketio.emit("console_output", {"data": f"$ {_mask_cmd(cmd)}\n"}, to=sid)
 
     try:
         proc = subprocess.Popen(
