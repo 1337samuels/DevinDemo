@@ -473,14 +473,18 @@ class FeatureFlagScanner:
                 f" ({detail})  | Phase 1: listing files ..."
             )
 
-        final_discovery = self._client.poll_session(
+        self._client.poll_session(
             session_id,
             interval=poll_interval,
             timeout=poll_timeout,
             on_update=_discovery_status,
+            expect_running_first=True,
         )
 
-        file_list = self._parse_discovery_response(final_discovery)
+        # Fetch conversation via V1 to get Devin's actual text response
+        # (the v3 GET session endpoint does not include message content).
+        v1_session = self._client.get_session_v1(session_id)
+        file_list = self._parse_discovery_response(v1_session)
         total_files = len(file_list)
         print(f"[scanner] Discovery complete: {total_files} .py files found.")
 
@@ -558,15 +562,17 @@ class FeatureFlagScanner:
                     f"  | Files: {_fdone}/{_ftot} ({pct}%)"
                 )
 
-            batch_final = self._client.poll_session(
+            self._client.poll_session(
                 session_id,
                 interval=poll_interval,
                 timeout=poll_timeout,
                 on_update=_batch_status,
+                expect_running_first=True,
             )
 
-            # Extract batch results
-            batch_result = self._parse_batch_response(batch_final)
+            # Fetch conversation via V1 to get Devin's latest text response
+            v1_session = self._client.get_session_v1(session_id)
+            batch_result = self._parse_batch_response(v1_session)
 
             # Accumulate findings
             all_flags.extend(batch_result.get("feature_flags", []))
@@ -615,11 +621,23 @@ class FeatureFlagScanner:
     # Response parsing
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _last_devin_message(session: dict[str, Any]) -> str:
+        """Return the text of the most recent ``devin_message`` in the
+        V1 session response's ``messages`` list.
+        """
+        messages = session.get("messages") or []
+        for msg in reversed(messages):
+            if msg.get("type") == "devin_message":
+                return msg.get("message", "")
+        return ""
+
     def _parse_discovery_response(self, session: dict[str, Any]) -> list[str]:
         """Extract the file list from the discovery session response.
 
-        Tries structured_output first, then falls back to parsing JSON
-        from the session text.
+        Uses the V1 session response which includes the full
+        ``messages`` list.  Tries structured_output first, then
+        parses JSON from Devin's last message.
         """
         # Try structured output
         structured = session.get("structured_output")
@@ -628,10 +646,8 @@ class FeatureFlagScanner:
             if isinstance(files, list) and len(files) > 0:
                 return files
 
-        # Structured output may not have files (schema is for scan results).
-        # Look for JSON in the last messages or status text.
-        # The discovery prompt asks Devin to output a JSON block.
-        last_text = session.get("last_message", "") or ""
+        # Parse JSON from Devin's last message in the conversation
+        last_text = self._last_devin_message(session)
         parsed = _extract_json_block(last_text)
         if parsed and "files" in parsed:
             return parsed["files"]
@@ -644,8 +660,9 @@ class FeatureFlagScanner:
     def _parse_batch_response(self, session: dict[str, Any]) -> dict[str, Any]:
         """Extract batch scan results from the session response.
 
-        Tries structured_output first, then falls back to parsing JSON
-        from the last message text.
+        Uses the V1 session response which includes the full
+        ``messages`` list.  Tries structured_output first, then
+        parses JSON from Devin's last message.
         """
         structured = session.get("structured_output")
         if structured is not None:
@@ -653,8 +670,8 @@ class FeatureFlagScanner:
             if structured.get("feature_flags") is not None:
                 return structured
 
-        # Fallback: parse JSON from the last message text
-        last_text = session.get("last_message", "") or ""
+        # Fallback: parse JSON from Devin's last message
+        last_text = self._last_devin_message(session)
         parsed = _extract_json_block(last_text)
         if parsed and "feature_flags" in parsed:
             return parsed

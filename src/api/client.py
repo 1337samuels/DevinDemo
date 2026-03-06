@@ -180,6 +180,20 @@ class DevinAPIClient:
             cursor = data.get("end_cursor")
         raise DevinAPIError(404, f"Session {session_id} not found via list endpoint.")
 
+    def get_session_v1(self, session_id: str) -> dict[str, Any]:
+        """Retrieve session details via the **v1** API.
+
+        Unlike the v3 GET endpoint, the v1 response includes a
+        ``messages`` list with the full conversation history.  This is
+        essential for extracting Devin's text responses (file lists,
+        scan results, etc.) which are not available through v3.
+        """
+        return self._request(
+            "GET",
+            f"/session/{session_id}",
+            _api_version="v1",
+        )
+
     def send_message(self, session_id: str, message: str) -> dict[str, Any]:
         """Send a follow-up message to a running session.
 
@@ -222,8 +236,9 @@ class DevinAPIClient:
         interval: int = 15,
         timeout: int = 600,
         on_update: Any | None = None,
+        expect_running_first: bool = False,
     ) -> dict[str, Any]:
-        """Poll a session until it reaches a terminal status.
+        """Poll a session until it reaches a terminal or idle status.
 
         Args:
             session_id: The session to poll.
@@ -231,6 +246,14 @@ class DevinAPIClient:
             timeout: Maximum total seconds to wait (default 600).
             on_update: Optional callback ``(session_dict) -> None``
                        called after each poll.
+            expect_running_first: When ``True``, ignore the initial
+                ``waiting_for_user`` status (because a message was just
+                sent and the session hasn't transitioned to ``running``
+                yet).  Once the session enters ``running`` (or any
+                non-``waiting_for_user`` state), normal exit conditions
+                apply.  This prevents the poller from returning
+                immediately on the *old* ``waiting_for_user`` status
+                after ``send_message()``.
 
         Returns:
             The final session dict once a terminal status is reached.
@@ -239,6 +262,10 @@ class DevinAPIClient:
             TimeoutError: If *timeout* seconds elapse before completion.
         """
         deadline = time.monotonic() + timeout
+        first_poll = True
+        saw_running = (
+            not expect_running_first
+        )  # False means: skip initial waiting_for_user
         while True:
             session = self.get_session(session_id)
             status = session.get("status", "")
@@ -246,6 +273,12 @@ class DevinAPIClient:
 
             if on_update is not None:
                 on_update(session)
+
+            # Track whether we've moved past the initial waiting_for_user
+            if not saw_running and not (
+                status == "running" and status_detail == "waiting_for_user"
+            ):
+                saw_running = True
 
             if status in _TERMINAL_STATUSES:
                 return session
@@ -257,8 +290,13 @@ class DevinAPIClient:
             # The session is waiting for a follow-up message.  In the
             # single-session multi-prompt flow, this means Devin finished
             # processing the current prompt and is ready for the next one.
-            # Always return here so the caller can send the next message.
-            if status == "running" and status_detail == "waiting_for_user":
+            # Only return here if we've already seen a non-waiting state
+            # (i.e. the session processed the message we just sent).
+            if (
+                status == "running"
+                and status_detail == "waiting_for_user"
+                and saw_running
+            ):
                 return session
 
             if time.monotonic() >= deadline:
@@ -267,4 +305,10 @@ class DevinAPIClient:
                     f"(last status: {status}/{status_detail})"
                 )
 
-            time.sleep(interval)
+            # Short delay on first poll so the user sees status immediately,
+            # then switch to the normal interval.
+            if first_poll:
+                first_poll = False
+                time.sleep(2)
+            else:
+                time.sleep(interval)
