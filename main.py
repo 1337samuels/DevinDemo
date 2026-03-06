@@ -32,8 +32,9 @@ class ProgressTracker:
     def __init__(self) -> None:
         self._start = time.monotonic()
         self._poll_count = 0
+        # Track when the first file was scanned to compute rate.
+        self._first_file_time: float | None = None
         self._prev_files = 0
-        self._prev_status = ""
 
     @staticmethod
     def _fmt_elapsed(seconds: float) -> str:
@@ -51,7 +52,6 @@ class ProgressTracker:
         # -- Extract progress from structured_output if available --
         output = session.get("structured_output")
         if output is None:
-            # No structured output yet — just show status + elapsed
             print(
                 f"  [{self._fmt_elapsed(elapsed)}] {status_str}"
                 f"  | Waiting for scan to start …"
@@ -59,6 +59,7 @@ class ProgressTracker:
             return
 
         summary = output.get("summary", {})
+        total_files = summary.get("total_files", 0)
         files_scanned = summary.get("files_scanned", 0)
         n_flags = summary.get(
             "total_feature_flags", len(output.get("feature_flags", []))
@@ -67,25 +68,35 @@ class ProgressTracker:
         n_debt = summary.get("total_tech_debt", len(output.get("tech_debt", [])))
         total_findings = n_flags + n_dead + n_debt
 
-        # -- ETA estimation based on files_scanned growth rate --
-        eta_str = "unknown"
-        if files_scanned > 0 and files_scanned > self._prev_files:
-            rate = files_scanned / elapsed  # files per second
-            # Rough heuristic: assume total files ≈ 2× what we've seen so far
-            # (since we don't know the total). Once we see no new files for
-            # two polls, we assume we're nearly done.
-            if rate > 0:
-                # Estimate remaining as "at least a few more polls"
-                remaining_est = max(15, elapsed * 0.3)  # conservative
-                eta_str = f"~{self._fmt_elapsed(remaining_est)}"
+        # -- Record when scanning actually started (first file done) --
+        if files_scanned > 0 and self._first_file_time is None:
+            self._first_file_time = time.monotonic()
 
-        if files_scanned > 0 and files_scanned == self._prev_files:
-            # No new files since last poll — likely finishing up
-            eta_str = "finishing up"
+        # -- Progress percentage --
+        if total_files > 0 and files_scanned > 0:
+            pct = min(100, int(files_scanned / total_files * 100))
+            progress_str = f"{files_scanned}/{total_files} ({pct}%)"
+        elif total_files > 0:
+            progress_str = f"0/{total_files} (0%)"
+        else:
+            progress_str = str(files_scanned)
+
+        # -- ETA based on actual scan rate --
+        eta_str = "calculating …"
+        if files_scanned > 0 and total_files > 0 and self._first_file_time is not None:
+            scan_elapsed = time.monotonic() - self._first_file_time
+            if scan_elapsed > 0 and files_scanned > 0:
+                rate = files_scanned / scan_elapsed  # files per second
+                remaining_files = total_files - files_scanned
+                if remaining_files <= 0:
+                    eta_str = "finishing up"
+                else:
+                    eta_seconds = remaining_files / rate
+                    eta_str = f"~{self._fmt_elapsed(eta_seconds)}"
 
         self._prev_files = files_scanned
 
-        # -- Build progress bar from findings --
+        # -- Build findings breakdown --
         bar_parts = []
         if n_flags:
             bar_parts.append(f"flags:{n_flags}")
@@ -97,7 +108,7 @@ class ProgressTracker:
 
         print(
             f"  [{self._fmt_elapsed(elapsed)}] {status_str}"
-            f"  | Files: {files_scanned}"
+            f"  | Files: {progress_str}"
             f"  | Findings: {total_findings} ({findings_str})"
             f"  | ETA: {eta_str}"
         )
