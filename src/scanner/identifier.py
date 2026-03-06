@@ -1,13 +1,18 @@
 """Part 1 — Identify feature flags, dead code, and tech debt.
 
-Uses a single Devin session with multiple prompts:
+Uses a **single Devin session** with sequential prompts via ``send_message()``:
 
-1. **Discovery prompt** — the initial session prompt asks Devin to list
-   every ``.py`` file in the repository.
-2. **Batch scan prompts** — follow-up messages in the same session instruct
-   Devin to scan batches of files.  This gives the caller precise progress
-   tracking (batch N/M, X/Y files, Z%) without the overhead of creating
-   multiple sessions.
+1. **Setup** — create a session with a neutral prompt (no schema) and wait
+   for it to become ready.
+2. **Discovery prompt** — ``send_message()`` asks Devin to list every
+   ``.py`` file in the repository.
+3. **Batch scan prompts** — ``send_message()`` for each batch of files,
+   giving the caller precise progress tracking (batch N/M, X/Y files, Z%).
+
+The session is archived after all batches complete.
+
+Note: ``send_message()`` uses the **v1** API endpoint which works with
+``cog_`` service-user keys without requiring ``ManageOrgSessions``.
 """
 
 from __future__ import annotations
@@ -35,7 +40,7 @@ Once you have the list, respond with **only** a JSON block like this (no other t
 Do NOT scan or analyse the file contents yet — just list them.
 """
 
-_BATCH_SCAN_PROMPT = """Now scan **only** the following Python files:
+_BATCH_SCAN_PROMPT = """Scan **only** the following Python files:
 
 {file_list}
 
@@ -285,7 +290,7 @@ def _enrich_results(
         summary["total_files"] = total_files
     return {
         "meta": {
-            "scanner_version": "1.2.0",
+            "scanner_version": "1.4.0",
             "scan_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "session_id": session_id,
             "repo": repo,
@@ -359,13 +364,14 @@ OnProgressCallback = Callable[[int, int, int, int, dict[str, Any] | None], None]
 class FeatureFlagScanner:
     """Scan a repository for feature flags, dead code, and tech debt.
 
-    Uses a **single Devin session** with multiple prompts:
+    Uses a **single Devin session** with sequential prompts:
 
-    1. **Discovery** — the initial prompt asks Devin to list all ``.py``
-       files in the repo.
-    2. **Batch scans** — follow-up messages in the same session instruct
-       Devin to scan batches of files.  The caller gets precise progress
-       tracking between batches.
+    1. **Setup** — create session with neutral prompt, wait until ready.
+    2. **Discovery** — ``send_message()`` to list all ``.py`` files.
+    3. **Batch scans** — ``send_message()`` for each batch of files.
+
+    The session is archived after all batches complete.
+    ``send_message()`` uses the v1 API which works with ``cog_`` keys.
     """
 
     DEFAULT_BATCH_SIZE = 10
@@ -408,14 +414,21 @@ class FeatureFlagScanner:
         if batch_size is None:
             batch_size = self.DEFAULT_BATCH_SIZE
 
-        # ---- Create session with discovery prompt ----
-        discovery_prompt = _DISCOVERY_PROMPT.format(repo=repo)
+        # ---- Create session with a neutral setup prompt ----
+        # We intentionally do NOT pass structured_output_schema here
+        # because the schema describes scan results and would cause
+        # Devin to start scanning files immediately instead of just
+        # listing them.  Results are extracted from message text.
+        setup_prompt = (
+            f"You are a code-quality scanning assistant for the "
+            f"repository **{repo}**.  Wait for my instructions "
+            f"before doing anything."
+        )
 
         print(f"[scanner] Creating session for {repo} ...")
         session = self._client.create_session(
-            prompt=discovery_prompt,
+            prompt=setup_prompt,
             repos=[repo],
-            structured_output_schema=SCAN_OUTPUT_SCHEMA,
             tags=["feature-flag-scan", "automated"],
             title=f"Code scan: {repo}",
             max_acu_limit=max_acu_limit,
@@ -424,8 +437,31 @@ class FeatureFlagScanner:
         print(f"[scanner] Session: {session_id}")
         print(f"[scanner] URL: {session.get('url', '')}")
 
-        # ---- Phase 1: Wait for discovery response ----
+        # Wait for session to be ready
+        print("[scanner] Waiting for session to initialise ...")
+        phase0_start = time.monotonic()
+
+        def _setup_status(sess: dict[str, Any]) -> None:
+            elapsed = time.monotonic() - phase0_start
+            status = sess.get("status", "")
+            detail = sess.get("status_detail", "")
+            print(
+                f"  [{_fmt_elapsed(elapsed)}] {status}"
+                f" ({detail})  | Initialising session ..."
+            )
+
+        self._client.poll_session(
+            session_id,
+            interval=poll_interval,
+            timeout=poll_timeout,
+            on_update=_setup_status,
+        )
+
+        # ---- Phase 1: Send discovery prompt ----
         print("[scanner] Phase 1: discovering .py files ...")
+        discovery_prompt = _DISCOVERY_PROMPT.format(repo=repo)
+        self._client.send_message(session_id, discovery_prompt)
+
         phase1_start = time.monotonic()
 
         def _discovery_status(sess: dict[str, Any]) -> None:
@@ -437,19 +473,24 @@ class FeatureFlagScanner:
                 f" ({detail})  | Phase 1: listing files ..."
             )
 
-        final = self._client.poll_session(
+        self._client.poll_session(
             session_id,
             interval=poll_interval,
             timeout=poll_timeout,
             on_update=_discovery_status,
+            expect_running_first=True,
         )
 
-        file_list = self._parse_discovery_response(final)
+        # Fetch conversation via V1 to get Devin's actual text response
+        # (the v3 GET session endpoint does not include message content).
+        v1_session = self._client.get_session_v1(session_id)
+        file_list = self._parse_discovery_response(v1_session)
         total_files = len(file_list)
         print(f"[scanner] Discovery complete: {total_files} .py files found.")
 
         if total_files == 0:
             print("[scanner] No .py files found — nothing to scan.")
+            self._client.archive_session(session_id)
             return _enrich_results(
                 {
                     "repo": repo,
@@ -495,7 +536,7 @@ class FeatureFlagScanner:
             # Send batch scan prompt as a follow-up message
             file_list_str = "\n".join(f"- ``{f}``" for f in batch_files)
             batch_prompt = _BATCH_SCAN_PROMPT.format(
-                repo=repo, file_list=file_list_str, file_count=len(batch_files)
+                file_list=file_list_str, file_count=len(batch_files)
             )
             self._client.send_message(session_id, batch_prompt)
 
@@ -521,15 +562,17 @@ class FeatureFlagScanner:
                     f"  | Files: {_fdone}/{_ftot} ({pct}%)"
                 )
 
-            batch_final = self._client.poll_session(
+            self._client.poll_session(
                 session_id,
                 interval=poll_interval,
                 timeout=poll_timeout,
                 on_update=_batch_status,
+                expect_running_first=True,
             )
 
-            # Try to extract batch results from structured output
-            batch_result = self._parse_batch_response(batch_final)
+            # Fetch conversation via V1 to get Devin's latest text response
+            v1_session = self._client.get_session_v1(session_id)
+            batch_result = self._parse_batch_response(v1_session)
 
             # Accumulate findings
             all_flags.extend(batch_result.get("feature_flags", []))
@@ -566,6 +609,10 @@ class FeatureFlagScanner:
             total_files=total_files,
         )
 
+        # ---- Archive the session so it doesn't linger ----
+        print("[scanner] Archiving session ...")
+        self._client.archive_session(session_id)
+
         print("\n[scanner] All batches complete. Results:")
         print(json.dumps(enriched, indent=2))
         return enriched
@@ -574,11 +621,23 @@ class FeatureFlagScanner:
     # Response parsing
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _last_devin_message(session: dict[str, Any]) -> str:
+        """Return the text of the most recent ``devin_message`` in the
+        V1 session response's ``messages`` list.
+        """
+        messages = session.get("messages") or []
+        for msg in reversed(messages):
+            if msg.get("type") == "devin_message":
+                return msg.get("message", "")
+        return ""
+
     def _parse_discovery_response(self, session: dict[str, Any]) -> list[str]:
         """Extract the file list from the discovery session response.
 
-        Tries structured_output first, then falls back to parsing JSON
-        from the session text.
+        Uses the V1 session response which includes the full
+        ``messages`` list.  Tries structured_output first, then
+        parses JSON from Devin's last message.
         """
         # Try structured output
         structured = session.get("structured_output")
@@ -587,10 +646,8 @@ class FeatureFlagScanner:
             if isinstance(files, list) and len(files) > 0:
                 return files
 
-        # Structured output may not have files (schema is for scan results).
-        # Look for JSON in the last messages or status text.
-        # The discovery prompt asks Devin to output a JSON block.
-        last_text = session.get("last_message", "") or ""
+        # Parse JSON from Devin's last message in the conversation
+        last_text = self._last_devin_message(session)
         parsed = _extract_json_block(last_text)
         if parsed and "files" in parsed:
             return parsed["files"]
@@ -603,8 +660,9 @@ class FeatureFlagScanner:
     def _parse_batch_response(self, session: dict[str, Any]) -> dict[str, Any]:
         """Extract batch scan results from the session response.
 
-        Tries structured_output first, then falls back to parsing JSON
-        from the last message text.
+        Uses the V1 session response which includes the full
+        ``messages`` list.  Tries structured_output first, then
+        parses JSON from Devin's last message.
         """
         structured = session.get("structured_output")
         if structured is not None:
@@ -612,8 +670,8 @@ class FeatureFlagScanner:
             if structured.get("feature_flags") is not None:
                 return structured
 
-        # Fallback: parse JSON from the last message text
-        last_text = session.get("last_message", "") or ""
+        # Fallback: parse JSON from Devin's last message
+        last_text = self._last_devin_message(session)
         parsed = _extract_json_block(last_text)
         if parsed and "feature_flags" in parsed:
             return parsed

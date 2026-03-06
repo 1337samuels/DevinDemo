@@ -164,7 +164,9 @@ class ValidationProgressTracker:
 
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run the identification scan (Part 1)."""
-    client = DevinAPIClient(api_key=args.api_key, org_id=args.org_id)
+    client = DevinAPIClient(
+        api_key=args.api_key, org_id=args.org_id, v1_api_key=args.v1_api_key
+    )
     scanner = FeatureFlagScanner(client)
 
     tracker = ProgressTracker()
@@ -290,7 +292,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--api-key",
         required=True,
-        help="Devin service user API key (starts with cog_).",
+        help="Devin service user API key (starts with cog_) for the v3 API.",
+    )
+    parser.add_argument(
+        "--v1-api-key",
+        required=True,
+        help="Devin legacy API key (starts with apk_) for v1 send_message.",
     )
     parser.add_argument(
         "--org-id",
