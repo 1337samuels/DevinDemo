@@ -460,7 +460,7 @@
             <button class="tab" data-phase="dashboard">Dashboard</button>
             <button class="tab active" data-phase="scan">Phase 1: Scan</button>
             <button class="tab" data-phase="validate">Phase 2: Validate</button>
-            <button class="tab" data-phase="cleanup">Phase 3: Cleanup</button>
+            <button class="tab" data-phase="cleanup">Phase 3: Auto Fix PR's</button>
             <button class="tab" data-phase="report">Phase 4: Report</button>
         </div>
 
@@ -618,7 +618,7 @@
             </div>
         </div>
 
-        <!-- Phase 3: Cleanup -->
+        <!-- Phase 3: Auto Fix PR's -->
         <div class="phase-panel" id="panel-cleanup">
             <div class="form-grid">
                 <div class="section-label">Devin API</div>
@@ -635,7 +635,7 @@
                     <input type="text" id="cleanup-org-id" placeholder="org-..." />
                 </div>
 
-                <div class="section-label">Cleanup Configuration</div>
+                <div class="section-label">Auto Fix PR's Configuration</div>
                 <div class="form-group">
                     <label>Input File (Phase 2 Validate Results) <span class="required">*</span></label>
                     <div class="file-selector">
@@ -665,7 +665,7 @@
                 </div>
             </div>
 
-            <!-- Cleanup console -->
+            <!-- Auto Fix PR's console -->
             <div class="console-panel" id="console-panel-cleanup">
                 <div class="console-header">
                     <h3><span class="status-dot" id="status-dot-cleanup"></span> Console</h3>
@@ -695,7 +695,7 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Cleanup Results File</label>
+                    <label>Auto Fix PR's Results File</label>
                     <div class="file-selector">
                         <select id="report-cleanup-results" data-file-type="cleanup" class="file-dropdown">
                             <option value="">Loading...</option>
@@ -912,6 +912,12 @@
         // ----- Dashboard: move console panels in/out of the grid -----
 
         const PHASES = ['scan', 'validate', 'cleanup', 'report'];
+        const PHASE_LABELS = {
+            scan: 'Phase 1: Scan',
+            validate: 'Phase 2: Validate',
+            cleanup: "Phase 3: Auto Fix PR's",
+            report: 'Phase 4: Report'
+        };
         const dashboardGrid = document.getElementById('dashboard-grid');
 
         // Original parent locations so we can move consoles back
@@ -928,8 +934,7 @@
                 panel.querySelector('.console-header h3').innerHTML =
                     '<span class="status-dot' +
                     (phaseRunning[p] ? ' running' : '') +
-                    '" id="status-dot-' + p + '"></span> Phase: ' +
-                    p.charAt(0).toUpperCase() + p.slice(1);
+                    '" id="status-dot-' + p + '"></span> ' + PHASE_LABELS[p];
                 dashboardGrid.appendChild(panel);
             });
         }
