@@ -40,9 +40,17 @@ Once you have the list, respond with **only** a JSON block like this (no other t
 Do NOT scan or analyse the file contents yet — just list them.
 """
 
-_BATCH_SCAN_PROMPT = """Scan **only** the following Python files:
+_BATCH_SCAN_PROMPT = """Scan **only** the following Python files, **one at a time in order**:
 
 {file_list}
+
+**IMPORTANT — progress reporting:** After you finish scanning each file,
+immediately print exactly this line (before moving on to the next file):
+
+    [SCANNED] path/to/file.py
+
+For example, after scanning ``code/foo.py`` print ``[SCANNED] code/foo.py``.
+This lets me track your progress in real time.
 
 For each file, identify **all** of the following:
 
@@ -65,7 +73,8 @@ Look for general feature-flag patterns — this project does NOT use a specific 
 - Compatibility shims for old Python versions (e.g. ``sys.version`` checks,   ``six`` library usage).
 
 ## Output format
-Respond with **only** a JSON block (no other text):
+After printing ``[SCANNED]`` for every file above, respond with **only** a
+JSON block (no other text):
 
 ```json
 {{
@@ -93,6 +102,9 @@ Respond with **only** a JSON block (no other text):
 
 Do NOT scan files outside the list above.  Do NOT truncate results.
 """
+
+# Regex to extract [SCANNED] markers from Devin messages.
+_SCANNED_RE = re.compile(r"\[SCANNED\]\s+(\S+)")
 
 # ---------------------------------------------------------------------------
 # Structured output schema (set at session creation for final output)
@@ -541,7 +553,9 @@ class FeatureFlagScanner:
             )
             self._client.send_message(session_id, batch_prompt)
 
-            # Wait for Devin to finish processing this batch
+            # Wait for Devin to finish processing this batch.
+            # The on_update callback fetches V1 messages to count
+            # [SCANNED] markers for real per-file progress.
             batch_start = time.monotonic()
 
             def _batch_status(
@@ -551,16 +565,34 @@ class FeatureFlagScanner:
                 _fdone: int = files_done,
                 _ftot: int = total_files,
                 _bstart: float = batch_start,
+                _bfiles: list[str] = batch_files,
+                _sid: str = session_id,
             ) -> None:
                 elapsed = time.monotonic() - _bstart
                 status = sess.get("status", "")
                 detail = sess.get("status_detail", "")
-                pct = min(100, int(_fdone / _ftot * 100)) if _ftot > 0 else 0
+
+                # Fetch V1 messages to count [SCANNED] markers.
+                # NOTE: The V1 messages API only exposes *complete*
+                # messages.  While Devin is "working" its response is
+                # still being generated, so markers won't appear until
+                # the batch finishes (status → waiting_for_user).
+                # We still check every poll so the count updates as
+                # soon as the response is finalised.
+                batch_scanned = 0
+                try:
+                    v1 = self._client.get_session_v1(_sid)
+                    batch_scanned = self._count_scanned_files(v1, _bfiles)
+                except Exception:
+                    pass  # Non-critical; fall back to 0
+
+                cur_files = _fdone + batch_scanned
+                pct = min(100, int(cur_files / _ftot * 100)) if _ftot > 0 else 0
                 print(
                     f"  [{_fmt_elapsed(elapsed)}] {status}"
                     f" ({detail})"
                     f"  | Batch {_bidx}/{_btot}"
-                    f"  | Files: {_fdone}/{_ftot} ({pct}%)"
+                    f"  | Files: {cur_files}/{_ftot} ({pct}%)"
                 )
 
             self._client.poll_session(
@@ -621,6 +653,29 @@ class FeatureFlagScanner:
     # ------------------------------------------------------------------
     # Response parsing
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _count_scanned_files(
+        v1_session: dict[str, Any],
+        batch_files: list[str],
+    ) -> int:
+        """Count how many ``[SCANNED] <file>`` markers Devin has printed
+        so far in the **current batch** by scanning the V1 messages list.
+
+        Only counts files that belong to *batch_files* so that markers
+        from previous batches are not double-counted.
+        """
+        batch_set = set(batch_files)
+        scanned: set[str] = set()
+        for msg in v1_session.get("messages") or []:
+            if msg.get("type") != "devin_message":
+                continue
+            text = msg.get("message", "")
+            for match in _SCANNED_RE.finditer(text):
+                path = match.group(1)
+                if path in batch_set:
+                    scanned.add(path)
+        return len(scanned)
 
     @staticmethod
     def _last_devin_message(session: dict[str, Any]) -> str:
