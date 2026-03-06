@@ -216,18 +216,23 @@ class DevinAPIClient:
             if status == "running" and status_detail == "finished":
                 return session
 
-            # Handle waiting_for_user
+            # The session is waiting for a follow-up message.  In the
+            # single-session multi-prompt flow this means Devin finished
+            # the current prompt.  If a callback is provided, let it
+            # react (e.g. send a nudge) before we decide whether to
+            # return or keep polling.
             if status == "running" and status_detail == "waiting_for_user":
-                # If structured output exists, we have what we need.
-                if session.get("structured_output") is not None:
-                    return session
-
-                # If a callback was provided, let it decide what to do.
                 if on_waiting_for_user is not None:
                     keep_polling = on_waiting_for_user(self, session)
-                    if not keep_polling:
-                        return session
-                # Otherwise keep polling (original behaviour).
+                    if keep_polling:
+                        # Callback asked us to keep polling (e.g. it
+                        # sent a nudge message and wants to wait for
+                        # the session to resume).
+                        if time.monotonic() < deadline:
+                            time.sleep(interval)
+                            continue
+                # Default: return immediately so the caller can act.
+                return session
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(
