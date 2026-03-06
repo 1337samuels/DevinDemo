@@ -307,6 +307,64 @@
             margin-bottom: 0.5rem;
             color: var(--yellow);
         }
+
+        /* Layer checkboxes */
+        .layer-checkboxes {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .layer-checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .layer-checkbox-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .layer-checkbox-row label {
+            font-size: 0.8125rem;
+            color: var(--text);
+            cursor: pointer;
+            text-transform: none;
+            letter-spacing: normal;
+            font-weight: 400;
+        }
+
+        .layer-checkbox-row label .layer-num {
+            color: var(--text-muted);
+            font-weight: 600;
+            margin-right: 0.25rem;
+        }
+
+        .layer-toggle-all {
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            text-decoration: underline;
+            font-family: inherit;
+        }
+
+        .layer-toggle-all:hover {
+            color: var(--accent-hover);
+        }
+
+        .layer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            grid-column: 1 / -1;
+        }
     </style>
 </head>
 <body>
@@ -419,6 +477,16 @@
                     <input type="number" id="validate-max-batch-size" placeholder="5" />
                 </div>
 
+                <div class="layer-header">
+                    <div class="section-label" style="margin:0;">Validation Layers</div>
+                    <button type="button" class="layer-toggle-all" id="layer-toggle-all" onclick="toggleAllLayers()">Deselect All</button>
+                </div>
+                <div class="form-group full-width">
+                    <div class="layer-checkboxes" id="layer-checkboxes">
+                        <!-- Populated dynamically from /api/validation-layers -->
+                    </div>
+                </div>
+
                 <div class="section-label">Advanced Overrides</div>
                 <div class="form-group">
                     <label>Staleness Days</label>
@@ -516,6 +584,66 @@
         const socket = io();
         let currentPhase = 'scan';
         let isRunning = false;
+
+        // ----- Validation layer checkboxes -----
+
+        let allLayersSelected = true;
+
+        async function loadLayerCheckboxes() {
+            const container = document.getElementById('layer-checkboxes');
+            if (!container) return;
+            try {
+                const resp = await fetch('/api/validation-layers');
+                const layers = await resp.json();
+                container.innerHTML = '';
+                layers.forEach(function(layer) {
+                    const row = document.createElement('div');
+                    row.className = 'layer-checkbox-row';
+
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.id = 'layer-' + layer.number;
+                    cb.checked = true;
+                    cb.dataset.layerNumber = layer.number;
+                    cb.addEventListener('change', updateToggleAllLabel);
+
+                    const lbl = document.createElement('label');
+                    lbl.htmlFor = cb.id;
+                    lbl.innerHTML = '<span class="layer-num">' + layer.number + '.</span> ' + layer.label;
+
+                    row.appendChild(cb);
+                    row.appendChild(lbl);
+                    container.appendChild(row);
+                });
+            } catch (err) {
+                container.innerHTML = '<span style="color:var(--red);font-size:0.8rem;">Failed to load layers</span>';
+            }
+        }
+
+        function toggleAllLayers() {
+            const checkboxes = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]');
+            allLayersSelected = !allLayersSelected;
+            checkboxes.forEach(function(cb) { cb.checked = allLayersSelected; });
+            updateToggleAllLabel();
+        }
+
+        function updateToggleAllLabel() {
+            const checkboxes = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]');
+            const allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
+            allLayersSelected = allChecked;
+            const btn = document.getElementById('layer-toggle-all');
+            if (btn) {
+                btn.textContent = allChecked ? 'Deselect All' : 'Select All';
+            }
+        }
+
+        function getSelectedLayers() {
+            const checkboxes = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]:checked');
+            const nums = Array.from(checkboxes).map(function(cb) { return cb.dataset.layerNumber; });
+            return nums.join(',');
+        }
+
+        loadLayerCheckboxes();
 
         // ----- File dropdown management -----
 
@@ -690,6 +818,14 @@
                     alert('API Key (v3), API Key (v1), Organization ID, and Input File are required.');
                     return;
                 }
+                const selectedLayers = getSelectedLayers();
+                if (!selectedLayers) {
+                    alert('At least one validation layer must be selected.');
+                    return;
+                }
+                // If all layers are selected, don't pass --layers (use default)
+                const totalLayers = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]').length;
+                const checkedCount = document.querySelectorAll('#layer-checkboxes input[type="checkbox"]:checked').length;
                 args = {
                     api_key: apiKey,
                     v1_api_key: v1ApiKey,
@@ -703,6 +839,7 @@
                     staleness_days: getNumVal('validate-staleness-days'),
                     pr_lookback_days: getNumVal('validate-pr-lookback-days'),
                     issue_lookback_days: getNumVal('validate-issue-lookback-days'),
+                    layers: (checkedCount < totalLayers) ? selectedLayers : null,
                 };
             } else if (currentPhase === 'cleanup') {
                 const apiKey = getVal('scan-api-key');
