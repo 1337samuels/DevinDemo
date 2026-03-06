@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 from src.api.client import DevinAPIClient, DevinAPIError
 from src.scanner.identifier import FeatureFlagScanner
+from src.validator.validator import LegacyCodeValidator
 
 
 class ProgressTracker:
@@ -80,6 +81,43 @@ class ProgressTracker:
         )
 
 
+class ValidationProgressTracker:
+    """Stateful callback for validation session polling.
+
+    Displays elapsed time, batch index, and session status.
+
+    In the single-session flow there is no incremental
+    ``structured_output`` to inspect, so the tracker simply shows
+    the Devin session status (``working``, ``waiting_for_user``,
+    etc.) alongside the batch label.
+    """
+
+    def __init__(self, batch_idx: int, total_batches: int, batch_size: int) -> None:
+        self._start = time.monotonic()
+        self._batch_idx = batch_idx
+        self._total_batches = total_batches
+        self._batch_size = batch_size
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s" if m else f"{s}s"
+
+    def __call__(self, session: dict) -> None:
+        elapsed = time.monotonic() - self._start
+
+        status = session.get("status", "?")
+        detail = session.get("status_detail", "")
+        status_str = f"{status} ({detail})" if detail else status
+
+        batch_label = f"Batch {self._batch_idx}/{self._total_batches}"
+
+        print(
+            f"  [{self._fmt_elapsed(elapsed)}] {batch_label} | {status_str}"
+            f"  | Candidates: {self._batch_size}"
+        )
+
+
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run the identification scan (Part 1)."""
     client = DevinAPIClient(
@@ -139,9 +177,57 @@ def _default_output_path(prefix: str) -> str:
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
-    """Run the validation step (Part 2) — not yet implemented."""
-    print("Validation is not yet implemented.", file=sys.stderr)
-    sys.exit(1)
+    """Run the validation step (Part 2)."""
+    # Load Part 1 results from JSON file
+    try:
+        with open(args.input, "r") as fh:
+            findings = json.load(fh)
+    except FileNotFoundError:
+        print(f"Input file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as exc:
+        print(f"Invalid JSON in {args.input}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    client = DevinAPIClient(
+        api_key=args.api_key, org_id=args.org_id, v1_api_key=args.v1_api_key
+    )
+
+    # Build optional config overrides
+    config: dict[str, int] = {}
+    if args.staleness_days is not None:
+        config["staleness_days"] = args.staleness_days
+    if args.pr_lookback_days is not None:
+        config["pr_lookback_days"] = args.pr_lookback_days
+    if args.issue_lookback_days is not None:
+        config["issue_lookback_days"] = args.issue_lookback_days
+
+    validator = LegacyCodeValidator(client, config=config if config else None)
+
+    try:
+        results = validator.validate(
+            findings,
+            poll_interval=args.poll_interval,
+            poll_timeout=args.poll_timeout,
+            max_acu_limit=args.max_acu,
+            progress_tracker_factory=ValidationProgressTracker,
+            max_batch_size=args.max_batch_size,
+        )
+    except DevinAPIError as exc:
+        print(f"Devin API error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except TimeoutError as exc:
+        print(f"Timeout: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(3)
+
+    output_path = args.output or _default_output_path("validate")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as fh:
+        json.dump(results, fh, indent=2)
+    print(f"\nFull validated results written to {output_path}")
 
 
 def cmd_cleanup(args: argparse.Namespace) -> None:
@@ -210,9 +296,59 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan_p.set_defaults(func=cmd_scan)
 
-    # ---- validate (Part 2 — stub) ----
+    # ---- validate (Part 2) ----
     validate_p = subparsers.add_parser(
-        "validate", help="[NOT YET IMPLEMENTED] Validate identified findings."
+        "validate", help="Validate identified findings via 8-layer analysis."
+    )
+    validate_p.add_argument(
+        "input",
+        help="Path to the Part 1 JSON results file.",
+    )
+    validate_p.add_argument(
+        "--output", "-o",
+        help="Write full validated JSON results to this file.",
+    )
+    validate_p.add_argument(
+        "--poll-interval",
+        type=int,
+        default=15,
+        help="Seconds between status polls (default: 15).",
+    )
+    validate_p.add_argument(
+        "--poll-timeout",
+        type=int,
+        default=900,
+        help="Max seconds to wait per session (default: 900).",
+    )
+    validate_p.add_argument(
+        "--max-acu",
+        type=int,
+        default=None,
+        help="Optional ACU cap per Devin session.",
+    )
+    validate_p.add_argument(
+        "--max-batch-size",
+        type=int,
+        default=5,
+        help="Max candidates per DevinAPI session (default: 5).",
+    )
+    validate_p.add_argument(
+        "--staleness-days",
+        type=int,
+        default=None,
+        help="Override staleness threshold in days (default: 365).",
+    )
+    validate_p.add_argument(
+        "--pr-lookback-days",
+        type=int,
+        default=None,
+        help="Override PR lookback period in days (default: 90).",
+    )
+    validate_p.add_argument(
+        "--issue-lookback-days",
+        type=int,
+        default=None,
+        help="Override issue lookback period in days (default: 180).",
     )
     validate_p.set_defaults(func=cmd_validate)
 

@@ -236,6 +236,7 @@ class DevinAPIClient:
         interval: int = 15,
         timeout: int = 600,
         on_update: Any | None = None,
+        on_waiting_for_user: Any | None = None,
         expect_running_first: bool = False,
     ) -> dict[str, Any]:
         """Poll a session until it reaches a terminal or idle status.
@@ -254,6 +255,14 @@ class DevinAPIClient:
             timeout: Maximum total seconds to wait (default 600).
             on_update: Optional callback ``(session_dict) -> None``
                        called after each poll.
+            on_waiting_for_user: Optional callback
+                ``(client, session_dict) -> bool`` called when the session
+                enters ``waiting_for_user``.  The callback can send a
+                follow-up message via ``client.send_message()`` and
+                should return ``True`` to keep polling or ``False`` to
+                return immediately.  If not provided the session is
+                returned immediately when ``waiting_for_user`` (after
+                ``saw_running`` is satisfied).
             expect_running_first: When ``True``, ignore the initial
                 ``waiting_for_user`` status (because a message was just
                 sent and the session hasn't transitioned to ``running``
@@ -295,15 +304,25 @@ class DevinAPIClient:
                 return session
 
             # The session is waiting for a follow-up message.  In the
-            # single-session multi-prompt flow, this means Devin finished
-            # processing the current prompt and is ready for the next one.
-            # Only return here if we've already seen a non-waiting state
-            # (i.e. the session processed the message we just sent).
+            # single-session multi-prompt flow this means Devin finished
+            # the current prompt.  If a callback is provided, let it
+            # react (e.g. send a nudge) before we decide whether to
+            # return or keep polling.
             if (
                 status == "running"
                 and status_detail == "waiting_for_user"
                 and saw_running
             ):
+                if on_waiting_for_user is not None:
+                    keep_polling = on_waiting_for_user(self, session)
+                    if keep_polling:
+                        # Callback asked us to keep polling (e.g. it
+                        # sent a nudge message and wants to wait for
+                        # the session to resume).
+                        if time.monotonic() < deadline:
+                            time.sleep(interval)
+                            continue
+                # Default: return immediately so the caller can act.
                 return session
 
             if time.monotonic() >= deadline:
