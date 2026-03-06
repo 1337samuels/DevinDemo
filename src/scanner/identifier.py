@@ -596,6 +596,10 @@ class FeatureFlagScanner:
             total_files=total_files,
         )
 
+        # ---- Archive the session so it doesn't linger ----
+        print("[scanner] Archiving session ...")
+        self._client.archive_session(session_id)
+
         print("\n[scanner] All batches complete. Results:")
         print(json.dumps(enriched, indent=2))
         return enriched

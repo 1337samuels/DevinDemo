@@ -46,8 +46,8 @@ class DevinAPIClient:
     # Low-level helpers
     # ------------------------------------------------------------------
 
-    def _url(self, path: str) -> str:
-        return f"{DEVIN_API_BASE_URL}/v3/organizations/{self._org_id}{path}"
+    def _url(self, path: str, *, api_version: str = "v3") -> str:
+        return f"{DEVIN_API_BASE_URL}/{api_version}/organizations/{self._org_id}{path}"
 
     def _request(
         self,
@@ -56,6 +56,7 @@ class DevinAPIClient:
         *,
         _retries: int = 3,
         _backoff: float = 2.0,
+        _api_version: str = "v3",
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Send an HTTP request with automatic retry on transient 5xx errors.
@@ -63,10 +64,12 @@ class DevinAPIClient:
         Args:
             _retries: Max number of retry attempts for 5xx responses.
             _backoff: Base delay in seconds (doubles each retry).
+            _api_version: API version prefix (default ``v3``).
         """
         last_exc: DevinAPIError | None = None
+        url = self._url(path, api_version=_api_version)
         for attempt in range(_retries + 1):
-            resp = self._session.request(method, self._url(path), **kwargs)
+            resp = self._session.request(method, url, **kwargs)
             if resp.ok:
                 return resp.json()
 
@@ -162,6 +165,23 @@ class DevinAPIClient:
             f"/sessions/{session_id}/messages",
             json={"message": message},
         )
+
+    def archive_session(self, session_id: str) -> dict[str, Any]:
+        """Archive (put to sleep) a session.
+
+        Uses the ``v3beta1`` archive endpoint to suspend a running
+        session so it no longer consumes resources.
+        """
+        try:
+            return self._request(
+                "POST",
+                f"/sessions/{session_id}/archive",
+                _api_version="v3beta1",
+            )
+        except DevinAPIError as exc:
+            # Non-critical — log and continue if archiving fails
+            print(f"[api] Warning: could not archive session {session_id}: {exc}")
+            return {}
 
     # ------------------------------------------------------------------
     # Polling
