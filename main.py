@@ -340,55 +340,45 @@ def _load_secrets(path: Path = _SECRETS_PATH) -> dict[str, str]:
     return secrets
 
 
-def _apply_secrets(args: argparse.Namespace) -> None:
-    """Fill missing CLI arguments from ``secrets.txt`` if available."""
-    secrets = _load_secrets()
-    if not secrets:
-        return
-
-    command = getattr(args, "command", None)
-    if not command:
-        return
-
-    applied: list[str] = []
-    for secret_key, (dest, commands) in _SECRETS_MAP.items():
-        if command not in commands:
-            continue
-        if secret_key not in secrets:
-            continue
-        current = getattr(args, dest, None)
-        if current is None:
-            setattr(args, dest, secrets[secret_key])
-            applied.append(f"{secret_key} -> --{dest.replace('_', '-')}")
-
-    if applied:
-        print(f"[secrets] Loaded from {_SECRETS_FILE}: {', '.join(applied)}")
+def _get_secret(secrets: dict[str, str], key: str) -> str | None:
+    """Return the value for *key* from the secrets dict, or ``None``."""
+    return secrets.get(key)
 
 
-def _add_devin_api_args(parser: argparse.ArgumentParser) -> None:
+def _add_devin_api_args(
+    parser: argparse.ArgumentParser,
+    secrets: dict[str, str],
+) -> None:
     """Add --api-key and --org-id arguments to a subparser (phases 1-3).
 
-    These are not marked ``required`` because they can be auto-filled from
-    ``secrets.txt``.  A post-parse check in ``main()`` ensures they are set.
+    Defaults are pre-populated from ``secrets.txt`` when available so that
+    the user doesn't need to pass them on every invocation.
     """
     parser.add_argument(
         "--api-key",
-        default=None,
+        default=_get_secret(secrets, "API_V3_KEY"),
         help="Devin service user API key (starts with cog_) for the v3 API.",
     )
     parser.add_argument(
         "--v1-api-key",
-        default=None,
+        default=_get_secret(secrets, "API_V1_KEY"),
         help="Devin legacy API key (starts with apk_) for v1 send_message.",
     )
     parser.add_argument(
         "--org-id",
-        default=None,
+        default=_get_secret(secrets, "ORG_ID"),
         help="Devin organization ID (starts with org-).",
     )
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Load secrets once, up front, so every subparser can use them as defaults.
+    secrets = _load_secrets()
+    if secrets:
+        loaded_keys = [k for k in _SECRETS_MAP if k in secrets]
+        if loaded_keys:
+            print(f"[secrets] Loaded from {_SECRETS_FILE}: {', '.join(loaded_keys)}")
+
     parser = argparse.ArgumentParser(
         description="Devin-powered feature-flag & tech-debt scanner.",
     )
@@ -397,7 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ---- scan (Part 1) ----
     scan_p = subparsers.add_parser("scan", help="Identify feature flags & tech debt.")
-    _add_devin_api_args(scan_p)
+    _add_devin_api_args(scan_p, secrets)
     scan_p.add_argument("repo", help="GitHub repo in owner/repo format.")
     scan_p.add_argument("--output", "-o", help="Write full JSON results to this file.")
     scan_p.add_argument(
@@ -430,7 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_p = subparsers.add_parser(
         "validate", help="Validate identified findings via 8-layer analysis."
     )
-    _add_devin_api_args(validate_p)
+    _add_devin_api_args(validate_p, secrets)
     validate_p.add_argument(
         "input",
         help="Path to the Part 1 JSON results file.",
@@ -487,7 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup_p = subparsers.add_parser(
         "cleanup", help="[NOT YET IMPLEMENTED] Generate cleanup PRs."
     )
-    _add_devin_api_args(cleanup_p)
+    _add_devin_api_args(cleanup_p, secrets)
     cleanup_p.set_defaults(func=cmd_cleanup)
 
     # ---- report (Part 4) ----
@@ -509,6 +499,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument(
         "--notion-api-key",
+        default=_get_secret(secrets, "NOTION_SECRET"),
         help="Notion integration API token.",
     )
     report_p.add_argument(
@@ -520,6 +511,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument(
         "--notion-parent-page-id",
+        default=_get_secret(secrets, "NOTION_MASTER_PAGE_ID"),
         help=(
             "Notion page ID under which to create a new database "
             "(required on first run if --notion-database-id is not set)."
@@ -541,9 +533,6 @@ _REQUIRED_DEVIN_ARGS = {"scan", "validate", "cleanup"}
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-
-    # Auto-fill from secrets.txt before validation
-    _apply_secrets(args)
 
     # Enforce required Devin API credentials for phases 1-3
     if args.command in _REQUIRED_DEVIN_ARGS:
