@@ -205,18 +205,33 @@ class CleanupProgressTracker:
         finding_idx: int,
         total_findings: int,
         candidate_id: str,
+        client: DevinAPIClient | None = None,
+        session_id: str = "",
     ) -> None:
         self._finding_idx = finding_idx
         self._total = total_findings
         self._candidate_id = candidate_id
+        self._client = client
+        self._session_id = session_id
         self._start = time.monotonic()
+        self._poll_count = 0
 
     @staticmethod
     def _fmt_elapsed(seconds: float) -> str:
         m, s = divmod(int(seconds), 60)
         return f"{m}m{s:02d}s" if m else f"{s}s"
 
+    @staticmethod
+    def _last_devin_message(session: dict[str, Any]) -> str:
+        """Return the text of the most recent ``devin_message``."""
+        messages = session.get("messages") or []
+        for msg in reversed(messages):
+            if msg.get("type") == "devin_message":
+                return msg.get("message", "")
+        return ""
+
     def __call__(self, session: dict[str, Any]) -> None:
+        self._poll_count += 1
         elapsed = time.monotonic() - self._start
         status = session.get("status", "")
         detail = session.get("status_detail", "")
@@ -226,6 +241,20 @@ class CleanupProgressTracker:
             f"  | Finding {self._finding_idx}/{self._total}"
             f"  | {self._candidate_id}"
         )
+
+        # Every 2nd poll, fetch V1 messages and print the
+        # latest Devin message so the user sees progress.
+        if self._poll_count % 2 == 0 and self._client and self._session_id:
+            try:
+                v1 = self._client.get_session_v1(self._session_id)
+                latest_msg = self._last_devin_message(v1)
+                if latest_msg:
+                    snippet = latest_msg[:200].replace("\n", " ").strip()
+                    if len(latest_msg) > 200:
+                        snippet += " ..."
+                    print(f"    \u2514\u2500 Devin: {snippet}")
+            except Exception:
+                pass  # Non-critical
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +419,10 @@ class CleanupPRGenerator:
             if progress_tracker_factory is not None:
                 tracker = progress_tracker_factory(idx, total, candidate_id)
             else:
-                tracker = CleanupProgressTracker(idx, total, candidate_id)
+                tracker = CleanupProgressTracker(
+                    idx, total, candidate_id,
+                    client=self._client, session_id=session_id,
+                )
 
             # Wait for Devin to finish the PR
             def _on_waiting(

@@ -1459,6 +1459,7 @@ class LegacyCodeValidator:
 
             # Wait for Devin to finish processing this batch
             batch_start = time.monotonic()
+            _poll_count = 0
 
             def _batch_status(
                 sess: dict[str, Any],
@@ -1466,7 +1467,10 @@ class LegacyCodeValidator:
                 _btot: int = total_batches,
                 _ncand: int = len(batch_candidates),
                 _bstart: float = batch_start,
+                _sid: str = session_id,
             ) -> None:
+                nonlocal _poll_count
+                _poll_count += 1
                 elapsed = time.monotonic() - _bstart
                 status = sess.get("status", "")
                 detail = sess.get("status_detail", "")
@@ -1476,6 +1480,20 @@ class LegacyCodeValidator:
                     f"  | Batch {_bidx}/{_btot}"
                     f"  | Candidates: {_ncand}"
                 )
+
+                # Every 2nd poll, fetch V1 messages and print the
+                # latest Devin message so the user sees progress.
+                if _poll_count % 2 == 0:
+                    try:
+                        v1 = self._client.get_session_v1(_sid)
+                        latest_msg = self._last_devin_message(v1)
+                        if latest_msg:
+                            snippet = latest_msg[:200].replace("\n", " ").strip()
+                            if len(latest_msg) > 200:
+                                snippet += " ..."
+                            print(f"    \u2514\u2500 Devin: {snippet}")
+                    except Exception:
+                        pass  # Non-critical
 
             # Use the factory tracker if available, else the simple one
             on_update_cb = tracker if tracker is not None else _batch_status
