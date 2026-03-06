@@ -39,10 +39,18 @@ LAYER_DEFINITIONS: list[tuple[str, str, str]] = [
     ("layer_8_external_consumers", "Layer 8: External Consumers", "is_exported"),
 ]
 
-# Database property definitions used when creating a new database.
-_DB_PROPERTIES: dict[str, dict[str, Any]] = {
-    "Candidate ID": {"title": {}},
-    "Category": {
+# Desired column order.  The Notion API does NOT respect JSON key order
+# when creating a database — it sorts columns alphabetically.  To get
+# the columns in the right visual order we create the database with only
+# the title property, then add each subsequent column one-at-a-time via
+# sequential PATCH calls.  Each new property appears as the rightmost
+# column in the default view.
+#
+# The list below defines both the order AND the schema for every column.
+# "Candidate ID" (the title property) is always first and is included in
+# the initial POST, so it is not in this list.
+_COLUMNS_IN_ORDER: list[tuple[str, dict[str, Any]]] = [
+    ("Category", {
         "select": {
             "options": [
                 {"name": "feature_flag", "color": "blue"},
@@ -50,10 +58,10 @@ _DB_PROPERTIES: dict[str, dict[str, Any]] = {
                 {"name": "tech_debt", "color": "yellow"},
             ]
         }
-    },
-    "File": {"rich_text": {}},
-    "Line": {"number": {"format": "number"}},
-    "Confidence": {
+    }),
+    ("File", {"rich_text": {}}),
+    ("Line", {"number": {"format": "number"}}),
+    ("Confidence", {
         "select": {
             "options": [
                 {"name": "HIGH", "color": "red"},
@@ -62,24 +70,29 @@ _DB_PROPERTIES: dict[str, dict[str, Any]] = {
                 {"name": "EXEMPT", "color": "gray"},
             ]
         }
-    },
-    "Validation Count": {"number": {"format": "number"}},
-    # PR fields (empty for now, filled when Phase 3 data is available)
-    "PR Opened": {"checkbox": {}},
-    "PR URL": {"url": {}},
-    # Remaining columns
-    "Summary": {"rich_text": {}},
-    # 8 layer checkboxes
-    "Layer 1: Re-Confirm": {"checkbox": {}},
-    "Layer 2: Git Staleness": {"checkbox": {}},
-    "Layer 3: Active Dev": {"checkbox": {}},
-    "Layer 4: Reachability": {"checkbox": {}},
-    "Layer 5: Issue Archaeology": {"checkbox": {}},
-    "Layer 6: Test Coverage": {"checkbox": {}},
-    "Layer 7: Runtime Signals": {"checkbox": {}},
-    "Layer 8: External Consumers": {"checkbox": {}},
-    "Code Snippet": {"rich_text": {}},
-    "Detection Reasoning": {"rich_text": {}},
+    }),
+    ("Validation Count", {"number": {"format": "number"}}),
+    ("PR Opened", {"checkbox": {}}),
+    ("PR URL", {"url": {}}),
+    # --- everything after here is "the rest" ---
+    ("Summary", {"rich_text": {}}),
+    ("Layer 1: Re-Confirm", {"checkbox": {}}),
+    ("Layer 2: Git Staleness", {"checkbox": {}}),
+    ("Layer 3: Active Dev", {"checkbox": {}}),
+    ("Layer 4: Reachability", {"checkbox": {}}),
+    ("Layer 5: Issue Archaeology", {"checkbox": {}}),
+    ("Layer 6: Test Coverage", {"checkbox": {}}),
+    ("Layer 7: Runtime Signals", {"checkbox": {}}),
+    ("Layer 8: External Consumers", {"checkbox": {}}),
+    ("Code Snippet", {"rich_text": {}}),
+    ("Detection Reasoning", {"rich_text": {}}),
+]
+
+# Flat dict of all properties (for row building / reference).  Order does
+# not matter here — it is only used for lookups.
+_DB_PROPERTIES: dict[str, dict[str, Any]] = {
+    "Candidate ID": {"title": {}},
+    **{name: schema for name, schema in _COLUMNS_IN_ORDER},
 }
 
 
@@ -292,7 +305,16 @@ def create_notion_database(
     title: str | None = None,
     repo: str | None = None,
 ) -> str:
-    """Create a new Notion database under the given parent page.
+    """Create a new Notion database with columns in the desired order.
+
+    The Notion API ignores JSON key order and sorts columns
+    alphabetically when they are all provided in a single POST.  To
+    work around this we:
+
+    1. Create the database with **only** the title property.
+    2. Add each remaining column one-at-a-time via sequential PATCH
+       calls.  Each new property appears as the rightmost column in
+       the default view, giving us full control over visual order.
 
     If *title* is not provided, one is generated from *repo* and the
     current timestamp so that each run produces a uniquely named DB.
@@ -302,15 +324,29 @@ def create_notion_database(
     """
     if not title:
         title = _build_db_title(repo)
+
+    # Step 1: Create with title property only.
     payload: dict[str, Any] = {
         "parent": {"type": "page_id", "page_id": parent_page_id},
         "title": [{"type": "text", "text": {"content": title}}],
-        "properties": _DB_PROPERTIES,
+        "properties": {"Candidate ID": {"title": {}}},
     }
-
     result = _notion_request("POST", "/databases", api_key, payload)
     database_id = result["id"]
     print(f"[notion] Created database: {database_id}")
+
+    # Step 2: Add each column one-at-a-time so it appears rightmost.
+    for col_name, col_schema in _COLUMNS_IN_ORDER:
+        _notion_request(
+            "PATCH",
+            f"/databases/{database_id}",
+            api_key,
+            {"properties": {col_name: col_schema}},
+        )
+    print(
+        f"[notion] Added {len(_COLUMNS_IN_ORDER)} columns in desired order."
+    )
+
     return database_id
 
 
