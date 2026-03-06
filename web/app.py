@@ -288,12 +288,24 @@ def handle_run_phase(data):
 
     elif phase == "cleanup":
         cmd.append("cleanup")
+        # Required args
         if args.get("api_key"):
             cmd.extend(["--api-key", args["api_key"]])
         if args.get("v1_api_key"):
             cmd.extend(["--v1-api-key", args["v1_api_key"]])
         if args.get("org_id"):
             cmd.extend(["--org-id", args["org_id"]])
+        if args.get("input_file"):
+            cmd.append(args["input_file"])
+        # Optional args
+        if args.get("output"):
+            cmd.extend(["--output", args["output"]])
+        if args.get("poll_interval"):
+            cmd.extend(["--poll-interval", str(args["poll_interval"])])
+        if args.get("poll_timeout"):
+            cmd.extend(["--poll-timeout", str(args["poll_timeout"])])
+        if args.get("max_acu"):
+            cmd.extend(["--max-acu", str(args["max_acu"])])
 
     elif phase == "report":
         cmd.append("report")
