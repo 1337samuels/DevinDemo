@@ -987,14 +987,17 @@
                 const v1ApiKey = getVal('cleanup-v1-api-key');
                 const orgId = getVal('cleanup-org-id');
                 const inputFile = getFilePath('cleanup-input');
-                if (!apiKey || !v1ApiKey || !orgId || !inputFile) {
+                if ((!apiKey && !hasSecret('cleanup-api-key')) ||
+                    (!v1ApiKey && !hasSecret('cleanup-v1-api-key')) ||
+                    (!orgId && !hasSecret('cleanup-org-id')) ||
+                    !inputFile) {
                     alert('API Key (v3), API Key (v1), Organization ID, and Input File are required.');
                     return;
                 }
                 args = {
-                    api_key: apiKey,
-                    v1_api_key: v1ApiKey,
-                    org_id: orgId,
+                    api_key: apiKey || null,
+                    v1_api_key: v1ApiKey || null,
+                    org_id: orgId || null,
                     input_file: inputFile,
                     output: getVal('cleanup-output') || null,
                     poll_interval: getNumVal('cleanup-poll-interval'),

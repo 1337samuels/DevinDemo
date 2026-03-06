@@ -111,9 +111,9 @@ def api_secrets():
 
     # Map secrets.txt keys to the HTML input element IDs they correspond to
     _KEY_TO_FIELDS: dict[str, list[str]] = {
-        "API_V3_KEY": ["scan-api-key", "validate-api-key"],
-        "API_V1_KEY": ["scan-v1-api-key", "validate-v1-api-key"],
-        "ORG_ID": ["scan-org-id", "validate-org-id"],
+        "API_V3_KEY": ["scan-api-key", "validate-api-key", "cleanup-api-key"],
+        "API_V1_KEY": ["scan-v1-api-key", "validate-v1-api-key", "cleanup-v1-api-key"],
+        "ORG_ID": ["scan-org-id", "validate-org-id", "cleanup-org-id"],
         "NOTION_SECRET": ["report-notion-api-key"],
         "NOTION_MASTER_PAGE_ID": ["report-notion-parent-page-id"],
     }
