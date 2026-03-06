@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevinDemo Pipeline</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface-hover: #22263a;
+            --border: #2a2e3e;
+            --text: #e1e4ed;
+            --text-muted: #8b8fa3;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --radius: 8px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        header {
+            margin-bottom: 2rem;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+
+        /* Phase tabs */
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0;
+        }
+
+        .tab {
+            padding: 0.625rem 1.25rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+            font-weight: 500;
+        }
+
+        .tab:hover { color: var(--text); }
+
+        .tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab.stub {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Form layout */
+        .phase-panel { display: none; }
+        .phase-panel.active { display: block; }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .form-group label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .form-group label .required {
+            color: var(--red);
+        }
+
+        .form-group input, .form-group select {
+            padding: 0.5rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text);
+            font-size: 0.875rem;
+            font-family: inherit;
+            transition: border-color 0.15s;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .form-group input::placeholder {
+            color: var(--text-muted);
+            opacity: 0.5;
+        }
+
+        .form-group select {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b8fa3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            padding-right: 2rem;
+            cursor: pointer;
+        }
+
+        .form-group select option {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .file-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+
+        .file-selector .custom-path-row {
+            display: none;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .file-selector .custom-path-row.visible {
+            display: flex;
+        }
+
+        .file-selector .custom-path-row input {
+            flex: 1;
+        }
+
+        .section-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-top: 1rem;
+            margin-bottom: 0.25rem;
+            grid-column: 1 / -1;
+        }
+
+        /* Buttons */
+        .actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+
+        .btn {
+            padding: 0.625rem 1.5rem;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-danger {
+            background: transparent;
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.1); }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover { background: var(--surface-hover); }
+
+        /* Console */
+        .console-wrapper {
+            margin-top: 2rem;
+        }
+
+        .console-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .console-header h3 {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        .status-dot.running {
+            background: var(--green);
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-dot.error { background: var(--red); }
+        .status-dot.success { background: var(--green); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        #console {
+            background: #0a0c10;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 0.8125rem;
+            line-height: 1.6;
+            height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #a8b2c4;
+        }
+
+        #console .cmd { color: var(--accent); }
+        #console .error { color: var(--red); }
+        #console .success { color: var(--green); }
+
+        /* Scrollbar */
+        #console::-webkit-scrollbar { width: 6px; }
+        #console::-webkit-scrollbar-track { background: transparent; }
+        #console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        /* Stub notice */
+        .stub-notice {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .stub-notice h3 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: var(--yellow);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>DevinDemo Pipeline</h1>
+            <p>Feature-flag & tech-debt scanner powered by Devin API</p>
+        </header>
+
+        <!-- Phase tabs -->
+        <div class="tabs">
+            <button class="tab active" data-phase="scan">Phase 1: Scan</button>
+            <button class="tab" data-phase="validate">Phase 2: Validate</button>
+            <button class="tab stub" data-phase="cleanup">Phase 3: Cleanup</button>
+            <button class="tab" data-phase="report">Phase 4: Report</button>
+        </div>
+
+        <!-- Phase 1: Scan -->
+        <div class="phase-panel active" id="panel-scan">
+            <div class="form-grid">
+                <div class="section-label">Devin API</div>
+                <div class="form-group">
+                    <label>API Key (v3) <span class="required">*</span></label>
+                    <input type="password" id="scan-api-key" placeholder="cog_..." />
+                </div>
+                <div class="form-group">
+                    <label>API Key (v1) <span class="required">*</span></label>
+                    <input type="password" id="scan-v1-api-key" placeholder="apk_..." />
+                </div>
+                <div class="form-group">
+                    <label>Organization ID <span class="required">*</span></label>
+                    <input type="text" id="scan-org-id" placeholder="org-..." />
+                </div>
+
+                <div class="section-label">Scan Configuration</div>
+                <div class="form-group">
+                    <label>Repository <span class="required">*</span></label>
+                    <input type="text" id="scan-repo" placeholder="owner/repo" />
+                </div>
+                <div class="form-group">
+                    <label>Output File</label>
+                    <input type="text" id="scan-output" placeholder="Auto-generated if empty" />
+                </div>
+                <div class="form-group">
+                    <label>Batch Size</label>
+                    <input type="number" id="scan-batch-size" placeholder="10" />
+                </div>
+                <div class="form-group">
+                    <label>Poll Interval (s)</label>
+                    <input type="number" id="scan-poll-interval" placeholder="15" />
+                </div>
+                <div class="form-group">
+                    <label>Poll Timeout (s)</label>
+                    <input type="number" id="scan-poll-timeout" placeholder="900" />
+                </div>
+                <div class="form-group">
+                    <label>Max ACU</label>
+                    <input type="number" id="scan-max-acu" placeholder="Optional" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 2: Validate -->
+        <div class="phase-panel" id="panel-validate">
+            <div class="form-grid">
+                <div class="section-label">Devin API</div>
+                <div class="form-group">
+                    <label>API Key (v3) <span class="required">*</span></label>
+                    <input type="password" id="validate-api-key" placeholder="cog_..." />
+                </div>
+                <div class="form-group">
+                    <label>API Key (v1) <span class="required">*</span></label>
+                    <input type="password" id="validate-v1-api-key" placeholder="apk_..." />
+                </div>
+                <div class="form-group">
+                    <label>Organization ID <span class="required">*</span></label>
+                    <input type="text" id="validate-org-id" placeholder="org-..." />
+                </div>
+
+                <div class="section-label">Validation Configuration</div>
+                <div class="form-group">
+                    <label>Input File (Phase 1 Scan Results) <span class="required">*</span></label>
+                    <div class="file-selector">
+                        <select id="validate-input" data-file-type="scan" class="file-dropdown">
+                            <option value="">Loading...</option>
+                        </select>
+                        <div class="custom-path-row" id="validate-input-custom-row">
+                            <input type="text" id="validate-input-custom" placeholder="Enter custom file path..." />
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Output File</label>
+                    <input type="text" id="validate-output" placeholder="Auto-generated if empty" />
+                </div>
+                <div class="form-group">
+                    <label>Poll Interval (s)</label>
+                    <input type="number" id="validate-poll-interval" placeholder="15" />
+                </div>
+                <div class="form-group">
+                    <label>Poll Timeout (s)</label>
+                    <input type="number" id="validate-poll-timeout" placeholder="900" />
+                </div>
+                <div class="form-group">
+                    <label>Max ACU</label>
+                    <input type="number" id="validate-max-acu" placeholder="Optional" />
+                </div>
+                <div class="form-group">
+                    <label>Max Batch Size</label>
+                    <input type="number" id="validate-max-batch-size" placeholder="5" />
+                </div>
+
+                <div class="section-label">Advanced Overrides</div>
+                <div class="form-group">
+                    <label>Staleness Days</label>
+                    <input type="number" id="validate-staleness-days" placeholder="365" />
+                </div>
+                <div class="form-group">
+                    <label>PR Lookback Days</label>
+                    <input type="number" id="validate-pr-lookback-days" placeholder="90" />
+                </div>
+                <div class="form-group">
+                    <label>Issue Lookback Days</label>
+                    <input type="number" id="validate-issue-lookback-days" placeholder="180" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 3: Cleanup (stub) -->
+        <div class="phase-panel" id="panel-cleanup">
+            <div class="stub-notice">
+                <h3>Not Yet Implemented</h3>
+                <p>Phase 3 (Cleanup PR generation) is not yet available.</p>
+            </div>
+        </div>
+
+        <!-- Phase 4: Report -->
+        <div class="phase-panel" id="panel-report">
+            <div class="form-grid">
+                <div class="section-label">Input</div>
+                <div class="form-group">
+                    <label>Input File (Phase 2 Validate Results) <span class="required">*</span></label>
+                    <div class="file-selector">
+                        <select id="report-input" data-file-type="validate" class="file-dropdown">
+                            <option value="">Loading...</option>
+                        </select>
+                        <div class="custom-path-row" id="report-input-custom-row">
+                            <input type="text" id="report-input-custom" placeholder="Enter custom file path..." />
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Cleanup Results File</label>
+                    <div class="file-selector">
+                        <select id="report-cleanup-results" data-file-type="cleanup" class="file-dropdown">
+                            <option value="">Loading...</option>
+                        </select>
+                        <div class="custom-path-row" id="report-cleanup-results-custom-row">
+                            <input type="text" id="report-cleanup-results-custom" placeholder="Enter custom file path..." />
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Output File</label>
+                    <input type="text" id="report-output" placeholder="Auto-generated if empty" />
+                </div>
+
+                <div class="section-label">Notion</div>
+                <div class="form-group">
+                    <label>Notion API Key</label>
+                    <input type="password" id="report-notion-api-key" placeholder="secret_..." />
+                </div>
+                <div class="form-group">
+                    <label>Notion Database ID</label>
+                    <input type="text" id="report-notion-database-id" placeholder="Optional (creates new if empty)" />
+                </div>
+                <div class="form-group">
+                    <label>Notion Parent Page ID</label>
+                    <input type="text" id="report-notion-parent-page-id" placeholder="Required if no Database ID" />
+                </div>
+
+                <div class="section-label">Slack</div>
+                <div class="form-group full-width">
+                    <label>Slack Webhook URL</label>
+                    <input type="text" id="report-slack-webhook-url" placeholder="https://hooks.slack.com/services/..." />
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="actions">
+            <button class="btn btn-primary" id="btn-run" onclick="runPhase()">Run</button>
+            <button class="btn btn-danger" id="btn-stop" onclick="stopProcess()" style="display:none;">Stop</button>
+            <button class="btn btn-secondary" onclick="clearConsole()">Clear Console</button>
+        </div>
+
+        <!-- Console output -->
+        <div class="console-wrapper">
+            <div class="console-header">
+                <h3><span class="status-dot" id="status-dot"></span> Console Output</h3>
+            </div>
+            <div id="console"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentPhase = 'scan';
+        let isRunning = false;
+
+        // ----- File dropdown management -----
+
+        async function loadFileDropdown(selectId) {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            const fileType = select.dataset.fileType;
+            if (!fileType) return;
+            const prevValue = select.value;
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const resp = await fetch('/api/results/' + fileType);
+                const files = await resp.json();
+                select.innerHTML = '';
+                if (files.length === 0) {
+                    const empty = document.createElement('option');
+                    empty.value = '';
+                    empty.textContent = 'No ' + fileType + ' results found';
+                    select.appendChild(empty);
+                } else {
+                    const placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = 'Select a ' + fileType + ' result\u2026';
+                    select.appendChild(placeholder);
+                    files.forEach(function(f) {
+                        const opt = document.createElement('option');
+                        opt.value = f.path;
+                        opt.textContent = f.label;
+                        select.appendChild(opt);
+                    });
+                }
+                const customOpt = document.createElement('option');
+                customOpt.value = '__custom__';
+                customOpt.textContent = 'Custom path\u2026';
+                select.appendChild(customOpt);
+                if (prevValue && Array.from(select.options).some(function(o) { return o.value === prevValue; })) {
+                    select.value = prevValue;
+                }
+            } catch (err) {
+                select.innerHTML = '';
+                const errOpt = document.createElement('option');
+                errOpt.value = '';
+                errOpt.textContent = 'Error loading files';
+                select.appendChild(errOpt);
+                const customOpt = document.createElement('option');
+                customOpt.value = '__custom__';
+                customOpt.textContent = 'Custom path\u2026';
+                select.appendChild(customOpt);
+            }
+            onFileDropdownChange(selectId);
+        }
+
+        function onFileDropdownChange(selectId) {
+            const select = document.getElementById(selectId);
+            const customRow = document.getElementById(selectId + '-custom-row');
+            if (!select || !customRow) return;
+            if (select.value === '__custom__') {
+                customRow.classList.add('visible');
+            } else {
+                customRow.classList.remove('visible');
+            }
+        }
+
+        function getFilePath(selectId) {
+            const select = document.getElementById(selectId);
+            if (!select) return '';
+            if (select.value === '__custom__') {
+                const customInput = document.getElementById(selectId + '-custom');
+                return customInput ? customInput.value.trim() : '';
+            }
+            return select.value;
+        }
+
+        // Wire up change events for file dropdowns
+        document.querySelectorAll('.file-dropdown').forEach(function(sel) {
+            sel.addEventListener('change', function() { onFileDropdownChange(sel.id); });
+        });
+
+        function loadAllDropdowns() {
+            document.querySelectorAll('.file-dropdown').forEach(function(sel) {
+                loadFileDropdown(sel.id);
+            });
+        }
+        loadAllDropdowns();
+
+        // ----- Tab switching -----
+        document.querySelectorAll('.tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                if (tab.classList.contains('stub')) return;
+                document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+                document.querySelectorAll('.phase-panel').forEach(function(p) { p.classList.remove('active'); });
+                tab.classList.add('active');
+                currentPhase = tab.dataset.phase;
+                document.getElementById('panel-' + currentPhase).classList.add('active');
+                loadAllDropdowns();
+            });
+        });
+
+        // Console output
+        const consoleEl = document.getElementById('console');
+        const statusDot = document.getElementById('status-dot');
+
+        socket.on('console_output', (msg) => {
+            const span = document.createElement('span');
+            const text = msg.data;
+
+            if (text.startsWith('$')) {
+                span.className = 'cmd';
+            }
+
+            span.textContent = text;
+            consoleEl.appendChild(span);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        });
+
+        socket.on('process_done', (msg) => {
+            const span = document.createElement('span');
+            span.className = msg.success ? 'success' : 'error';
+            span.textContent = msg.data;
+            consoleEl.appendChild(span);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+
+            isRunning = false;
+            statusDot.className = msg.success ? 'status-dot success' : 'status-dot error';
+            document.getElementById('btn-run').disabled = false;
+            document.getElementById('btn-stop').style.display = 'none';
+            // Refresh dropdowns after process finishes (new result files may exist)
+            loadAllDropdowns();
+        });
+
+        function getVal(id) {
+            const el = document.getElementById(id);
+            return el ? el.value.trim() : '';
+        }
+
+        function getNumVal(id) {
+            const v = getVal(id);
+            return v ? parseInt(v, 10) : null;
+        }
+
+        function runPhase() {
+            if (isRunning) return;
+
+            let args = {};
+
+            if (currentPhase === 'scan') {
+                const apiKey = getVal('scan-api-key');
+                const v1ApiKey = getVal('scan-v1-api-key');
+                const orgId = getVal('scan-org-id');
+                const repo = getVal('scan-repo');
+                if (!apiKey || !v1ApiKey || !orgId || !repo) {
+                    alert('API Key (v3), API Key (v1), Organization ID, and Repository are required.');
+                    return;
+                }
+                args = {
+                    api_key: apiKey,
+                    v1_api_key: v1ApiKey,
+                    org_id: orgId,
+                    repo: repo,
+                    output: getVal('scan-output') || null,
+                    batch_size: getNumVal('scan-batch-size'),
+                    poll_interval: getNumVal('scan-poll-interval'),
+                    poll_timeout: getNumVal('scan-poll-timeout'),
+                    max_acu: getNumVal('scan-max-acu'),
+                };
+            } else if (currentPhase === 'validate') {
+                const apiKey = getVal('validate-api-key');
+                const v1ApiKey = getVal('validate-v1-api-key');
+                const orgId = getVal('validate-org-id');
+                const inputFile = getFilePath('validate-input');
+                if (!apiKey || !v1ApiKey || !orgId || !inputFile) {
+                    alert('API Key (v3), API Key (v1), Organization ID, and Input File are required.');
+                    return;
+                }
+                args = {
+                    api_key: apiKey,
+                    v1_api_key: v1ApiKey,
+                    org_id: orgId,
+                    input_file: inputFile,
+                    output: getVal('validate-output') || null,
+                    poll_interval: getNumVal('validate-poll-interval'),
+                    poll_timeout: getNumVal('validate-poll-timeout'),
+                    max_acu: getNumVal('validate-max-acu'),
+                    max_batch_size: getNumVal('validate-max-batch-size'),
+                    staleness_days: getNumVal('validate-staleness-days'),
+                    pr_lookback_days: getNumVal('validate-pr-lookback-days'),
+                    issue_lookback_days: getNumVal('validate-issue-lookback-days'),
+                };
+            } else if (currentPhase === 'cleanup') {
+                const apiKey = getVal('scan-api-key');
+                const orgId = getVal('scan-org-id');
+                args = { api_key: apiKey, org_id: orgId };
+            } else if (currentPhase === 'report') {
+                const inputFile = getFilePath('report-input');
+                if (!inputFile) {
+                    alert('Input File is required.');
+                    return;
+                }
+                args = {
+                    input_file: inputFile,
+                    output: getVal('report-output') || null,
+                    cleanup_results: getFilePath('report-cleanup-results') || null,
+                    notion_api_key: getVal('report-notion-api-key') || null,
+                    notion_database_id: getVal('report-notion-database-id') || null,
+                    notion_parent_page_id: getVal('report-notion-parent-page-id') || null,
+                    slack_webhook_url: getVal('report-slack-webhook-url') || null,
+                };
+            }
+
+            isRunning = true;
+            statusDot.className = 'status-dot running';
+            document.getElementById('btn-run').disabled = true;
+            document.getElementById('btn-stop').style.display = 'inline-block';
+
+            socket.emit('run_phase', { phase: currentPhase, args: args });
+        }
+
+        function stopProcess() {
+            socket.emit('stop_process');
+        }
+
+        function clearConsole() {
+            consoleEl.innerHTML = '';
+            statusDot.className = 'status-dot';
+        }
+    </script>
+</body>
+</html>
