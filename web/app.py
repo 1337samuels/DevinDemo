@@ -94,9 +94,10 @@ def _discover_result_files(prefix: str, repo_filter: str = "") -> list[dict]:
         try:
             with open(fpath, "r") as fh:
                 data = json.load(fh)
-                json_repo = data.get("repo", "")
-                if json_repo:
-                    repo = json_repo
+                if isinstance(data, dict):
+                    json_repo = data.get("repo", "")
+                    if json_repo:
+                        repo = json_repo
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -136,9 +137,10 @@ def _discover_all_repos() -> list[str]:
         try:
             with open(fpath, "r") as fh:
                 data = json.load(fh)
-                json_repo = data.get("repo", "")
-                if json_repo:
-                    repo = json_repo
+                if isinstance(data, dict):
+                    json_repo = data.get("repo", "")
+                    if json_repo:
+                        repo = json_repo
         except (json.JSONDecodeError, OSError):
             pass
         if repo and repo != "unknown":
