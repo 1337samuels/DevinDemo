@@ -139,8 +139,18 @@ def _layer_supports_removal(
     removal").
 
     Returns ``True`` when the layer evidence supports removing the code.
+    Returns ``False`` when the layer data is missing or the key field
+    is absent (we never assume support for removal without evidence).
     """
-    value = layer_data.get(field_key)
+    # If the layer wasn't evaluated at all, don't count it as supporting removal.
+    if not layer_data:
+        return False
+
+    # If the specific field is absent, we can't make a determination.
+    if field_key not in layer_data:
+        return False
+
+    value = layer_data[field_key]
 
     # Layers where True means "supports removal"
     if layer_key in ("layer_1_reconfirm", "layer_2_git_staleness"):
