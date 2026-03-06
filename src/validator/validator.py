@@ -1090,6 +1090,10 @@ class LegacyCodeValidator:
     # stuck in ``waiting_for_user`` without structured output.
     _MAX_NUDGE_ATTEMPTS = 3
 
+    # How long (seconds) to wait for the user to respond in the Devin UI
+    # after a 403 prevents sending a nudge programmatically.
+    _MANUAL_RESPONSE_TIMEOUT = 300
+
     # The follow-up message sent to unblock a waiting session.
     _NUDGE_MESSAGE = (
         "Please continue with the validation analysis and populate the "
@@ -1183,11 +1187,12 @@ class LegacyCodeValidator:
 
             # Build waiting_for_user handler that nudges the session.
             nudge_count = 0
+            manual_prompt_shown = False
 
             def _handle_waiting_for_user(
                 client: DevinAPIClient, sess: dict[str, Any]
             ) -> bool:
-                nonlocal nudge_count
+                nonlocal nudge_count, manual_prompt_shown
                 if nudge_count >= self._MAX_NUDGE_ATTEMPTS:
                     print(
                         f"[validator]   Session {session_id} still "
@@ -1205,9 +1210,35 @@ class LegacyCodeValidator:
                 try:
                     client.send_message(session_id, self._NUDGE_MESSAGE)
                 except Exception as exc:  # noqa: BLE001
-                    print(
-                        f"[validator]   WARNING: failed to send nudge: {exc}"
-                    )
+                    exc_str = str(exc)
+                    if "403" in exc_str and not manual_prompt_shown:
+                        manual_prompt_shown = True
+                        s_url = session_url or (
+                            f"https://app.devin.ai/sessions/{session_id}"
+                        )
+                        print(
+                            f"\n{'=' * 60}\n"
+                            f"ACTION REQUIRED\n"
+                            f"{'=' * 60}\n"
+                            f"Session {session_id} is waiting for user "
+                            f"input, but your API key does not have "
+                            f"permission to send messages "
+                            f"programmatically (HTTP 403).\n\n"
+                            f"Please open the session in your browser "
+                            f"and respond to unblock it:\n"
+                            f"  {s_url}\n\n"
+                            f"Suggested response:\n"
+                            f"  \"{self._NUDGE_MESSAGE}\"\n\n"
+                            f"Waiting up to "
+                            f"{self._MANUAL_RESPONSE_TIMEOUT}s for the "
+                            f"session to resume\u2026\n"
+                            f"{'=' * 60}"
+                        )
+                    elif "403" not in exc_str:
+                        print(
+                            f"[validator]   WARNING: failed to send "
+                            f"nudge: {exc}"
+                        )
                 return True  # keep polling
 
             final = self._client.poll_session(
