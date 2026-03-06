@@ -290,12 +290,8 @@ def cmd_report(args: argparse.Namespace) -> None:
         print("Save this ID for future runs with --notion-database-id.")
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Devin-powered feature-flag & tech-debt scanner.",
-    )
-
-    # ---- shared arguments ----
+def _add_devin_api_args(parser: argparse.ArgumentParser) -> None:
+    """Add --api-key and --org-id arguments to a subparser (phases 1-3)."""
     parser.add_argument(
         "--api-key",
         required=True,
@@ -312,10 +308,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Devin organization ID (starts with org-).",
     )
 
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Devin-powered feature-flag & tech-debt scanner.",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # ---- scan (Part 1) ----
     scan_p = subparsers.add_parser("scan", help="Identify feature flags & tech debt.")
+    _add_devin_api_args(scan_p)
     scan_p.add_argument("repo", help="GitHub repo in owner/repo format.")
     scan_p.add_argument("--output", "-o", help="Write full JSON results to this file.")
     scan_p.add_argument(
@@ -348,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_p = subparsers.add_parser(
         "validate", help="Validate identified findings via 8-layer analysis."
     )
+    _add_devin_api_args(validate_p)
     validate_p.add_argument(
         "input",
         help="Path to the Part 1 JSON results file.",
@@ -404,6 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup_p = subparsers.add_parser(
         "cleanup", help="[NOT YET IMPLEMENTED] Generate cleanup PRs."
     )
+    _add_devin_api_args(cleanup_p)
     cleanup_p.set_defaults(func=cmd_cleanup)
 
     # ---- report (Part 4) ----
@@ -411,7 +416,8 @@ def build_parser() -> argparse.ArgumentParser:
         "report", help="Publish validated findings to Notion / Slack."
     )
     report_p.add_argument(
-        "input",
+        "--input", "-i",
+        required=True,
         help="Path to the Phase 2 validated findings JSON file.",
     )
     report_p.add_argument(
