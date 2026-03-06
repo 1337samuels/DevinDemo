@@ -235,14 +235,6 @@ def cmd_validate(args: argparse.Namespace) -> None:
 class CleanupProgressTrackerFactory:
     """Progress tracker factory for the cleanup phase (Part 3)."""
 
-    def __init__(self) -> None:
-        self._start = time.monotonic()
-
-    @staticmethod
-    def _fmt_elapsed(seconds: float) -> str:
-        m, s = divmod(int(seconds), 60)
-        return f"{m}m{s:02d}s" if m else f"{s}s"
-
     def __call__(
         self,
         finding_idx: int,
