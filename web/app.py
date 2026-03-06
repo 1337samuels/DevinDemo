@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import glob
+import json
 import os
+import re
 import subprocess
 import sys
 import threading
 
-from flask import Flask, render_template
+from flask import Flask, jsonify, render_template
 from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
@@ -20,11 +23,76 @@ _process_lock = threading.Lock()
 
 # Path to the project root (one level up from web/)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+
+# Regex to parse default output filenames: <prefix>_YYYYMMDD_HHMMSS.json
+_FILENAME_RE = re.compile(
+    r"^(?P<prefix>scan|validate|cleanup|report)_"
+    r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})_"
+    r"(?P<hour>\d{2})(?P<minute>\d{2})(?P<second>\d{2})\.json$"
+)
+
+
+def _discover_result_files(prefix: str) -> list[dict]:
+    """Scan the results/ directory for files matching *prefix*_YYYYMMDD_HHMMSS.json.
+
+    For each file, parse the JSON to extract the 'repo' field and format the
+    timestamp from the filename.  Returns a list of dicts sorted newest-first:
+        [{"path": "results/scan_20260306_091500.json",
+          "repo": "owner/repo",
+          "datetime": "2026-03-06 09:15:00 UTC",
+          "label": "owner/repo  -  2026-03-06 09:15:00 UTC"}, ...]
+    """
+    results: list[dict] = []
+    if not os.path.isdir(RESULTS_DIR):
+        return results
+
+    for fname in os.listdir(RESULTS_DIR):
+        m = _FILENAME_RE.match(fname)
+        if not m or m.group("prefix") != prefix:
+            continue
+
+        fpath = os.path.join(RESULTS_DIR, fname)
+        rel_path = os.path.join("results", fname)
+
+        # Parse timestamp from filename
+        dt_str = (
+            f"{m.group('year')}-{m.group('month')}-{m.group('day')} "
+            f"{m.group('hour')}:{m.group('minute')}:{m.group('second')} UTC"
+        )
+
+        # Try to extract repo from JSON content
+        repo = "unknown"
+        try:
+            with open(fpath, "r") as fh:
+                data = json.load(fh)
+                repo = data.get("repo", "unknown")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+        results.append({
+            "path": rel_path,
+            "repo": repo,
+            "datetime": dt_str,
+            "label": f"{repo}  \u2014  {dt_str}",
+        })
+
+    # Sort newest first (by datetime string, which is lexicographically sortable)
+    results.sort(key=lambda r: r["datetime"], reverse=True)
+    return results
 
 
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/results/<prefix>")
+def api_results(prefix: str):
+    """Return available result files for a given phase prefix."""
+    if prefix not in ("scan", "validate", "cleanup", "report"):
+        return jsonify({"error": "Invalid prefix"}), 400
+    return jsonify(_discover_result_files(prefix))
 
 
 # Keys/secrets that should be masked in console output
@@ -122,6 +190,8 @@ def handle_run_phase(data):
         # Required args
         if args.get("api_key"):
             cmd.extend(["--api-key", args["api_key"]])
+        if args.get("v1_api_key"):
+            cmd.extend(["--v1-api-key", args["v1_api_key"]])
         if args.get("org_id"):
             cmd.extend(["--org-id", args["org_id"]])
         if args.get("repo"):
@@ -135,12 +205,16 @@ def handle_run_phase(data):
             cmd.extend(["--poll-timeout", str(args["poll_timeout"])])
         if args.get("max_acu"):
             cmd.extend(["--max-acu", str(args["max_acu"])])
+        if args.get("batch_size"):
+            cmd.extend(["--batch-size", str(args["batch_size"])])
 
     elif phase == "validate":
         cmd.append("validate")
         # Required args
         if args.get("api_key"):
             cmd.extend(["--api-key", args["api_key"]])
+        if args.get("v1_api_key"):
+            cmd.extend(["--v1-api-key", args["v1_api_key"]])
         if args.get("org_id"):
             cmd.extend(["--org-id", args["org_id"]])
         if args.get("input_file"):
@@ -167,6 +241,8 @@ def handle_run_phase(data):
         cmd.append("cleanup")
         if args.get("api_key"):
             cmd.extend(["--api-key", args["api_key"]])
+        if args.get("v1_api_key"):
+            cmd.extend(["--v1-api-key", args["v1_api_key"]])
         if args.get("org_id"):
             cmd.extend(["--org-id", args["org_id"]])
 

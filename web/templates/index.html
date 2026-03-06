@@ -117,7 +117,7 @@
             color: var(--red);
         }
 
-        .form-group input {
+        .form-group input, .form-group select {
             padding: 0.5rem 0.75rem;
             background: var(--surface);
             border: 1px solid var(--border);
@@ -128,7 +128,7 @@
             transition: border-color 0.15s;
         }
 
-        .form-group input:focus {
+        .form-group input:focus, .form-group select:focus {
             outline: none;
             border-color: var(--accent);
         }
@@ -136,6 +136,41 @@
         .form-group input::placeholder {
             color: var(--text-muted);
             opacity: 0.5;
+        }
+
+        .form-group select {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b8fa3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            padding-right: 2rem;
+            cursor: pointer;
+        }
+
+        .form-group select option {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .file-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 0.375rem;
+        }
+
+        .file-selector .custom-path-row {
+            display: none;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .file-selector .custom-path-row.visible {
+            display: flex;
+        }
+
+        .file-selector .custom-path-row input {
+            flex: 1;
         }
 
         .section-label {
@@ -294,8 +329,12 @@
             <div class="form-grid">
                 <div class="section-label">Devin API</div>
                 <div class="form-group">
-                    <label>API Key <span class="required">*</span></label>
+                    <label>API Key (v3) <span class="required">*</span></label>
                     <input type="password" id="scan-api-key" placeholder="cog_..." />
+                </div>
+                <div class="form-group">
+                    <label>API Key (v1) <span class="required">*</span></label>
+                    <input type="password" id="scan-v1-api-key" placeholder="apk_..." />
                 </div>
                 <div class="form-group">
                     <label>Organization ID <span class="required">*</span></label>
@@ -309,7 +348,11 @@
                 </div>
                 <div class="form-group">
                     <label>Output File</label>
-                    <input type="text" id="scan-output" placeholder="results/scan_output.json" />
+                    <input type="text" id="scan-output" placeholder="Auto-generated if empty" />
+                </div>
+                <div class="form-group">
+                    <label>Batch Size</label>
+                    <input type="number" id="scan-batch-size" placeholder="10" />
                 </div>
                 <div class="form-group">
                     <label>Poll Interval (s)</label>
@@ -331,8 +374,12 @@
             <div class="form-grid">
                 <div class="section-label">Devin API</div>
                 <div class="form-group">
-                    <label>API Key <span class="required">*</span></label>
+                    <label>API Key (v3) <span class="required">*</span></label>
                     <input type="password" id="validate-api-key" placeholder="cog_..." />
+                </div>
+                <div class="form-group">
+                    <label>API Key (v1) <span class="required">*</span></label>
+                    <input type="password" id="validate-v1-api-key" placeholder="apk_..." />
                 </div>
                 <div class="form-group">
                     <label>Organization ID <span class="required">*</span></label>
@@ -341,12 +388,19 @@
 
                 <div class="section-label">Validation Configuration</div>
                 <div class="form-group">
-                    <label>Input File (Phase 1 JSON) <span class="required">*</span></label>
-                    <input type="text" id="validate-input" placeholder="results/scan_output.json" />
+                    <label>Input File (Phase 1 Scan Results) <span class="required">*</span></label>
+                    <div class="file-selector">
+                        <select id="validate-input" data-file-type="scan" class="file-dropdown">
+                            <option value="">Loading...</option>
+                        </select>
+                        <div class="custom-path-row" id="validate-input-custom-row">
+                            <input type="text" id="validate-input-custom" placeholder="Enter custom file path..." />
+                        </div>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Output File</label>
-                    <input type="text" id="validate-output" placeholder="results/validate_output.json" />
+                    <input type="text" id="validate-output" placeholder="Auto-generated if empty" />
                 </div>
                 <div class="form-group">
                     <label>Poll Interval (s)</label>
@@ -394,16 +448,30 @@
             <div class="form-grid">
                 <div class="section-label">Input</div>
                 <div class="form-group">
-                    <label>Input File (Phase 2 JSON) <span class="required">*</span></label>
-                    <input type="text" id="report-input" placeholder="results/validate_output.json" />
+                    <label>Input File (Phase 2 Validate Results) <span class="required">*</span></label>
+                    <div class="file-selector">
+                        <select id="report-input" data-file-type="validate" class="file-dropdown">
+                            <option value="">Loading...</option>
+                        </select>
+                        <div class="custom-path-row" id="report-input-custom-row">
+                            <input type="text" id="report-input-custom" placeholder="Enter custom file path..." />
+                        </div>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Cleanup Results File</label>
-                    <input type="text" id="report-cleanup-results" placeholder="Optional: cleanup_results.json" />
+                    <div class="file-selector">
+                        <select id="report-cleanup-results" data-file-type="cleanup" class="file-dropdown">
+                            <option value="">Loading...</option>
+                        </select>
+                        <div class="custom-path-row" id="report-cleanup-results-custom-row">
+                            <input type="text" id="report-cleanup-results-custom" placeholder="Enter custom file path..." />
+                        </div>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Output File</label>
-                    <input type="text" id="report-output" placeholder="results/report_output.json" />
+                    <input type="text" id="report-output" placeholder="Auto-generated if empty" />
                 </div>
 
                 <div class="section-label">Notion</div>
@@ -449,17 +517,100 @@
         let currentPhase = 'scan';
         let isRunning = false;
 
-        // Tab switching
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
+        // ----- File dropdown management -----
+
+        async function loadFileDropdown(selectId) {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            const fileType = select.dataset.fileType;
+            if (!fileType) return;
+            const prevValue = select.value;
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const resp = await fetch('/api/results/' + fileType);
+                const files = await resp.json();
+                select.innerHTML = '';
+                if (files.length === 0) {
+                    const empty = document.createElement('option');
+                    empty.value = '';
+                    empty.textContent = 'No ' + fileType + ' results found';
+                    select.appendChild(empty);
+                } else {
+                    const placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = 'Select a ' + fileType + ' result\u2026';
+                    select.appendChild(placeholder);
+                    files.forEach(function(f) {
+                        const opt = document.createElement('option');
+                        opt.value = f.path;
+                        opt.textContent = f.label;
+                        select.appendChild(opt);
+                    });
+                }
+                const customOpt = document.createElement('option');
+                customOpt.value = '__custom__';
+                customOpt.textContent = 'Custom path\u2026';
+                select.appendChild(customOpt);
+                if (prevValue && Array.from(select.options).some(function(o) { return o.value === prevValue; })) {
+                    select.value = prevValue;
+                }
+            } catch (err) {
+                select.innerHTML = '';
+                const errOpt = document.createElement('option');
+                errOpt.value = '';
+                errOpt.textContent = 'Error loading files';
+                select.appendChild(errOpt);
+                const customOpt = document.createElement('option');
+                customOpt.value = '__custom__';
+                customOpt.textContent = 'Custom path\u2026';
+                select.appendChild(customOpt);
+            }
+            onFileDropdownChange(selectId);
+        }
+
+        function onFileDropdownChange(selectId) {
+            const select = document.getElementById(selectId);
+            const customRow = document.getElementById(selectId + '-custom-row');
+            if (!select || !customRow) return;
+            if (select.value === '__custom__') {
+                customRow.classList.add('visible');
+            } else {
+                customRow.classList.remove('visible');
+            }
+        }
+
+        function getFilePath(selectId) {
+            const select = document.getElementById(selectId);
+            if (!select) return '';
+            if (select.value === '__custom__') {
+                const customInput = document.getElementById(selectId + '-custom');
+                return customInput ? customInput.value.trim() : '';
+            }
+            return select.value;
+        }
+
+        // Wire up change events for file dropdowns
+        document.querySelectorAll('.file-dropdown').forEach(function(sel) {
+            sel.addEventListener('change', function() { onFileDropdownChange(sel.id); });
+        });
+
+        function loadAllDropdowns() {
+            document.querySelectorAll('.file-dropdown').forEach(function(sel) {
+                loadFileDropdown(sel.id);
+            });
+        }
+        loadAllDropdowns();
+
+        // ----- Tab switching -----
+        document.querySelectorAll('.tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
                 if (tab.classList.contains('stub')) return;
-
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.phase-panel').forEach(p => p.classList.remove('active'));
-
+                document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+                document.querySelectorAll('.phase-panel').forEach(function(p) { p.classList.remove('active'); });
                 tab.classList.add('active');
                 currentPhase = tab.dataset.phase;
-                document.getElementById(`panel-${currentPhase}`).classList.add('active');
+                document.getElementById('panel-' + currentPhase).classList.add('active');
+                loadAllDropdowns();
             });
         });
 
@@ -491,6 +642,8 @@
             statusDot.className = msg.success ? 'status-dot success' : 'status-dot error';
             document.getElementById('btn-run').disabled = false;
             document.getElementById('btn-stop').style.display = 'none';
+            // Refresh dropdowns after process finishes (new result files may exist)
+            loadAllDropdowns();
         });
 
         function getVal(id) {
@@ -510,31 +663,36 @@
 
             if (currentPhase === 'scan') {
                 const apiKey = getVal('scan-api-key');
+                const v1ApiKey = getVal('scan-v1-api-key');
                 const orgId = getVal('scan-org-id');
                 const repo = getVal('scan-repo');
-                if (!apiKey || !orgId || !repo) {
-                    alert('API Key, Organization ID, and Repository are required.');
+                if (!apiKey || !v1ApiKey || !orgId || !repo) {
+                    alert('API Key (v3), API Key (v1), Organization ID, and Repository are required.');
                     return;
                 }
                 args = {
                     api_key: apiKey,
+                    v1_api_key: v1ApiKey,
                     org_id: orgId,
                     repo: repo,
                     output: getVal('scan-output') || null,
+                    batch_size: getNumVal('scan-batch-size'),
                     poll_interval: getNumVal('scan-poll-interval'),
                     poll_timeout: getNumVal('scan-poll-timeout'),
                     max_acu: getNumVal('scan-max-acu'),
                 };
             } else if (currentPhase === 'validate') {
                 const apiKey = getVal('validate-api-key');
+                const v1ApiKey = getVal('validate-v1-api-key');
                 const orgId = getVal('validate-org-id');
-                const inputFile = getVal('validate-input');
-                if (!apiKey || !orgId || !inputFile) {
-                    alert('API Key, Organization ID, and Input File are required.');
+                const inputFile = getFilePath('validate-input');
+                if (!apiKey || !v1ApiKey || !orgId || !inputFile) {
+                    alert('API Key (v3), API Key (v1), Organization ID, and Input File are required.');
                     return;
                 }
                 args = {
                     api_key: apiKey,
+                    v1_api_key: v1ApiKey,
                     org_id: orgId,
                     input_file: inputFile,
                     output: getVal('validate-output') || null,
@@ -551,7 +709,7 @@
                 const orgId = getVal('scan-org-id');
                 args = { api_key: apiKey, org_id: orgId };
             } else if (currentPhase === 'report') {
-                const inputFile = getVal('report-input');
+                const inputFile = getFilePath('report-input');
                 if (!inputFile) {
                     alert('Input File is required.');
                     return;
@@ -559,7 +717,7 @@
                 args = {
                     input_file: inputFile,
                     output: getVal('report-output') || null,
-                    cleanup_results: getVal('report-cleanup-results') || null,
+                    cleanup_results: getFilePath('report-cleanup-results') || null,
                     notion_api_key: getVal('report-notion-api-key') || null,
                     notion_database_id: getVal('report-notion-database-id') || null,
                     notion_parent_page_id: getVal('report-notion-parent-page-id') || null,
