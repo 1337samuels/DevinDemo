@@ -1,22 +1,127 @@
 """Part 1 — Identify feature flags, dead code, and tech debt.
 
-Creates a Devin session that scans a target Python repository and returns
-structured findings via the ``structured_output`` mechanism.
+Uses a **single Devin session** with sequential prompts via ``send_message()``:
+
+1. **Setup** — create a session with a neutral prompt (no schema) and wait
+   for it to become ready.
+2. **Discovery prompt** — ``send_message()`` asks Devin to list every
+   ``.py`` file in the repository.
+3. **Batch scan prompts** — ``send_message()`` for each batch of files,
+   giving the caller precise progress tracking (batch N/M, X/Y files, Z%).
+
+The session is archived after all batches complete.
+
+Note: ``send_message()`` uses the **v1** API endpoint which works with
+``cog_`` service-user keys without requiring ``ManageOrgSessions``.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
-from typing import Any
+from typing import Any, Callable
 
 from src.api.client import DevinAPIClient
 
 # ---------------------------------------------------------------------------
-# Structured output schema (JSON Schema Draft 7)
+# Prompts
 # ---------------------------------------------------------------------------
-# Devin will populate this structure as it analyses the repo.
+
+_DISCOVERY_PROMPT = """You are a code-quality scanner.  For the repository **{repo}**, start by listing every ``.py`` file.  Use ``find . -name '*.py'`` (or equivalent) in the repo root.
+
+Once you have the list, respond with **only** a JSON block like this (no other text before or after it):
+
+```json
+{{"files": ["path/to/file1.py", "path/to/file2.py"], "total_files": 2}}
+```
+
+Do NOT scan or analyse the file contents yet — just list them.
+"""
+
+_BATCH_SCAN_PROMPT = """Scan **only** the following Python files, **one at a time in order**:
+
+{file_list}
+
+**IMPORTANT — progress reporting:** After you finish scanning each file,
+immediately print exactly this line (before moving on to the next file):
+
+    [SCANNED] path/to/file.py
+
+For example, after scanning ``code/foo.py`` print ``[SCANNED] code/foo.py``.
+This lets me track your progress in real time.
+
+For each file, identify **all** of the following:
+
+## 1. Feature Flags
+Look for general feature-flag patterns — this project does NOT use a specific flag management system (e.g. LaunchDarkly).  Instead, look for:
+- Environment variable checks that gate behaviour   (``os.environ.get("FEATURE_...")``, ``os.getenv(...)``).
+- Boolean configuration variables used in ``if`` / ``else`` branches   (e.g. ``ENABLE_NEW_UI = True``).
+- Functions whose sole purpose is to check whether a feature is enabled   (e.g. ``def is_feature_enabled(name): ...``).
+- Constants or settings that act as on/off switches.
+
+## 2. Dead Code
+- Unreachable branches (e.g. ``if False:``, ``if 0:``, always-true guards).
+- Unused functions or classes (defined but never called/imported elsewhere).
+- Unused imports.
+- Large blocks of commented-out code (>=3 consecutive commented lines that   look like former source code, NOT documentation comments).
+
+## 3. Tech Debt
+- ``TODO``, ``FIXME``, ``HACK``, ``XXX`` comments.
+- Use of deprecated stdlib or third-party APIs.
+- Compatibility shims for old Python versions (e.g. ``sys.version`` checks,   ``six`` library usage).
+
+## Output format
+After printing ``[SCANNED]`` for every file above, respond with **only** a
+JSON block (no other text):
+
+```json
+{{
+  "feature_flags": [
+    {{"file": "path.py", "line": 10, "pattern_type": "env_var_check",
+      "flag_name": "FEATURE_X", "code_snippet": "...", "reasoning": "..."}}
+  ],
+  "dead_code": [
+    {{"file": "path.py", "line": 20, "category": "unused_import",
+      "code_snippet": "...", "reasoning": "..."}}
+  ],
+  "tech_debt": [
+    {{"file": "path.py", "line": 30, "category": "todo_comment",
+      "code_snippet": "...", "reasoning": "..."}}
+  ],
+  "summary": {{
+    "files_scanned": {file_count},
+    "total_feature_flags": 0,
+    "total_dead_code": 0,
+    "total_tech_debt": 0,
+    "high_priority_items": []
+  }}
+}}
+```
+
+Do NOT scan files outside the list above.  Do NOT truncate results.
+"""
+
+# Regex to extract [SCANNED] markers from Devin messages.
+_SCANNED_RE = re.compile(r"\[SCANNED\]\s+(\S+)")
+
+# ---------------------------------------------------------------------------
+# Structured output schema (set at session creation for final output)
+# ---------------------------------------------------------------------------
+
+_FINDING_ITEM_PROPERTIES: dict[str, Any] = {
+    "file": {"type": "string", "description": "Relative file path."},
+    "line": {"type": "integer", "description": "Line number (1-indexed)."},
+    "code_snippet": {
+        "type": "string",
+        "description": "The relevant code snippet (<=5 lines).",
+    },
+    "reasoning": {
+        "type": "string",
+        "description": "Why this was flagged.",
+    },
+}
 
 SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -27,15 +132,11 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "feature_flags": {
             "type": "array",
-            "description": "Feature flag occurrences found in the codebase.",
+            "description": "All feature flag occurrences found.",
             "items": {
                 "type": "object",
                 "properties": {
-                    "file": {"type": "string", "description": "Relative file path."},
-                    "line": {
-                        "type": "integer",
-                        "description": "Line number (1-indexed).",
-                    },
+                    **_FINDING_ITEM_PROPERTIES,
                     "pattern_type": {
                         "type": "string",
                         "enum": [
@@ -47,17 +148,9 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                         ],
                         "description": "Category of the feature flag pattern.",
                     },
-                    "code_snippet": {
-                        "type": "string",
-                        "description": "The relevant code snippet (≤5 lines).",
-                    },
                     "flag_name": {
                         "type": "string",
                         "description": "Extracted flag / variable name.",
-                    },
-                    "reasoning": {
-                        "type": "string",
-                        "description": "Why this is considered a feature flag.",
                     },
                 },
                 "required": [
@@ -72,12 +165,11 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "dead_code": {
             "type": "array",
-            "description": "Dead or unreachable code found in the codebase.",
+            "description": "Dead or unreachable code found.",
             "items": {
                 "type": "object",
                 "properties": {
-                    "file": {"type": "string"},
-                    "line": {"type": "integer"},
+                    **_FINDING_ITEM_PROPERTIES,
                     "category": {
                         "type": "string",
                         "enum": [
@@ -89,8 +181,6 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                             "other",
                         ],
                     },
-                    "code_snippet": {"type": "string"},
-                    "reasoning": {"type": "string"},
                 },
                 "required": [
                     "file",
@@ -103,12 +193,11 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "tech_debt": {
             "type": "array",
-            "description": "Tech debt markers found in the codebase.",
+            "description": "Tech debt markers found.",
             "items": {
                 "type": "object",
                 "properties": {
-                    "file": {"type": "string"},
-                    "line": {"type": "integer"},
+                    **_FINDING_ITEM_PROPERTIES,
                     "category": {
                         "type": "string",
                         "enum": [
@@ -120,8 +209,6 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                             "other",
                         ],
                     },
-                    "code_snippet": {"type": "string"},
-                    "reasoning": {"type": "string"},
                 },
                 "required": [
                     "file",
@@ -134,12 +221,12 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "summary": {
             "type": "object",
-            "description": "High-level summary of the scan.",
+            "description": "Scan summary.",
             "properties": {
+                "files_scanned": {"type": "integer"},
                 "total_feature_flags": {"type": "integer"},
                 "total_dead_code": {"type": "integer"},
                 "total_tech_debt": {"type": "integer"},
-                "files_scanned": {"type": "integer"},
                 "high_priority_items": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -147,10 +234,10 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
                 },
             },
             "required": [
+                "files_scanned",
                 "total_feature_flags",
                 "total_dead_code",
                 "total_tech_debt",
-                "files_scanned",
                 "high_priority_items",
             ],
         },
@@ -163,46 +250,6 @@ SCAN_OUTPUT_SCHEMA: dict[str, Any] = {
         "summary",
     ],
 }
-
-# ---------------------------------------------------------------------------
-# Prompt template
-# ---------------------------------------------------------------------------
-
-_SCAN_PROMPT = """\
-You are a code-quality analyser.  Scan the Python files in the repository \
-**{repo}** and identify **all** of the following:
-
-## 1. Feature Flags
-Look for general feature-flag patterns — this project does NOT use a specific \
-flag management system (e.g. LaunchDarkly).  Instead, look for:
-- Environment variable checks that gate behaviour \
-  (``os.environ.get("FEATURE_…")``, ``os.getenv(…)``).
-- Boolean configuration variables used in ``if`` / ``else`` branches \
-  (e.g. ``ENABLE_NEW_UI = True``).
-- Functions whose sole purpose is to check whether a feature is enabled \
-  (e.g. ``def is_feature_enabled(name): …``).
-- Constants or settings that act as on/off switches.
-
-## 2. Dead Code
-- Unreachable branches (e.g. ``if False:``, ``if 0:``, always-true guards).
-- Unused functions or classes (defined but never called/imported elsewhere).
-- Unused imports.
-- Large blocks of commented-out code (≥3 consecutive commented lines that \
-  look like former source code, NOT documentation comments).
-
-## 3. Tech Debt
-- ``TODO``, ``FIXME``, ``HACK``, ``XXX`` comments.
-- Use of deprecated stdlib or third-party APIs.
-- Compatibility shims for old Python versions (e.g. ``sys.version`` checks, \
-  ``six`` library usage).
-
-## Output
-Update the **structured output** as you scan.  After you finish, the \
-structured output MUST conform to the JSON schema provided and include \
-every finding you discovered.  Do NOT truncate results.
-
-Be thorough — scan every ``.py`` file in the repository.
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +287,7 @@ def _enrich_results(
     *,
     session_id: str,
     repo: str,
+    total_files: int = 0,
 ) -> dict[str, Any]:
     """Wrap raw Devin output with metadata and per-finding IDs.
 
@@ -249,9 +297,12 @@ def _enrich_results(
     - ``verification_status``: starts as ``"unverified"``; Part 2 will
       update to ``"verified"``, ``"false_positive"``, or ``"needs_review"``.
     """
+    summary = raw.get("summary", {})
+    if total_files > 0:
+        summary["total_files"] = total_files
     return {
         "meta": {
-            "scanner_version": "1.0.0",
+            "scanner_version": "1.4.0",
             "scan_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "session_id": session_id,
             "repo": repo,
@@ -260,78 +311,437 @@ def _enrich_results(
         "feature_flags": _enrich_findings(raw.get("feature_flags", []), "feature_flag"),
         "dead_code": _enrich_findings(raw.get("dead_code", []), "dead_code"),
         "tech_debt": _enrich_findings(raw.get("tech_debt", []), "tech_debt"),
-        "summary": raw.get("summary", {}),
+        "summary": summary,
     }
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    """Format elapsed seconds as ``Xm YYs`` or ``Ys``."""
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m{s:02d}s" if m else f"{s}s"
+
+
+def _chunk_list(items: list[str], size: int) -> list[list[str]]:
+    """Split *items* into sub-lists of at most *size* elements."""
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _extract_json_block(text: str) -> dict[str, Any] | None:
+    """Extract the first JSON code-fence block from *text*.
+
+    Returns the parsed dict, or ``None`` if no valid JSON block is found.
+    """
+    # Try ```json ... ``` first
+    pattern = r"```(?:json)?\s*\n(\{.*?\})\s*\n```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: try to find a raw JSON object
+    brace_start = text.find("{")
+    if brace_start != -1:
+        # Find matching closing brace
+        depth = 0
+        for i in range(brace_start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[brace_start : i + 1])
+                    except json.JSONDecodeError:
+                        pass
+                    break
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Progress callback type
+# ---------------------------------------------------------------------------
+
+# ``on_progress(done_files, total_files, batch_idx, total_batches,
+#               batch_session_or_None)``
+OnProgressCallback = Callable[[int, int, int, int, dict[str, Any] | None], None]
 
 
 class FeatureFlagScanner:
     """Scan a repository for feature flags, dead code, and tech debt.
 
-    Uses the Devin API to create a session that analyses the target repo
-    and returns structured findings.
+    Uses a **single Devin session** with sequential prompts:
+
+    1. **Setup** — create session with neutral prompt, wait until ready.
+    2. **Discovery** — ``send_message()`` to list all ``.py`` files.
+    3. **Batch scans** — ``send_message()`` for each batch of files.
+
+    The session is archived after all batches complete.
+    ``send_message()`` uses the v1 API which works with ``cog_`` keys.
     """
+
+    DEFAULT_BATCH_SIZE = 10
 
     def __init__(self, client: DevinAPIClient) -> None:
         self._client = client
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
 
     def scan(
         self,
         repo: str,
         *,
+        batch_size: int | None = None,
         poll_interval: int = 15,
         poll_timeout: int = 900,
         max_acu_limit: int | None = None,
-        on_status_update: Any | None = None,
+        on_progress: OnProgressCallback | None = None,
     ) -> dict[str, Any]:
-        """Launch a scan and wait for the results.
+        """Run the full scan and return enriched results.
+
+        Creates a single Devin session, sends a discovery prompt first,
+        then sends batch scan prompts as follow-up messages.
 
         Args:
             repo: GitHub repository in ``owner/repo`` format.
+            batch_size: Max files per batch prompt (default 10).
             poll_interval: Seconds between status polls (default 15).
-            poll_timeout: Max seconds to wait for completion (default 900).
+            poll_timeout: Max seconds to wait per prompt (default 900).
             max_acu_limit: Optional ACU cap for the session.
-            on_status_update: Optional callback ``(session_dict) -> None``.
+            on_progress: Optional callback invoked between batches:
+                ``(done_files, total_files, batch_idx, total_batches,
+                session_or_None)``.
 
         Returns:
-            The structured output dict conforming to ``SCAN_OUTPUT_SCHEMA``.
-
-        Raises:
-            TimeoutError: If the session does not finish in time.
-            RuntimeError: If the session ends without structured output.
+            Enriched result dict ready for Part 2 consumption.
         """
-        prompt = _SCAN_PROMPT.format(repo=repo)
+        if batch_size is None:
+            batch_size = self.DEFAULT_BATCH_SIZE
 
-        print(f"[scanner] Creating Devin session to scan {repo} …")
+        # ---- Create session with a neutral setup prompt ----
+        # We intentionally do NOT pass structured_output_schema here
+        # because the schema describes scan results and would cause
+        # Devin to start scanning files immediately instead of just
+        # listing them.  Results are extracted from message text.
+        setup_prompt = (
+            f"You are a code-quality scanning assistant for the "
+            f"repository **{repo}**.  Wait for my instructions "
+            f"before doing anything."
+        )
+
+        print(f"[scanner] Creating session for {repo} ...")
         session = self._client.create_session(
-            prompt=prompt,
+            prompt=setup_prompt,
             repos=[repo],
-            structured_output_schema=SCAN_OUTPUT_SCHEMA,
             tags=["feature-flag-scan", "automated"],
-            title=f"Feature-flag scan: {repo}",
+            title=f"Code scan: {repo}",
             max_acu_limit=max_acu_limit,
         )
         session_id = session["session_id"]
-        session_url = session.get("url", "")
-        print(f"[scanner] Session created: {session_id}")
-        print(f"[scanner] URL: {session_url}")
-        print(f"[scanner] Polling every {poll_interval}s (timeout {poll_timeout}s) …")
+        print(f"[scanner] Session: {session_id}")
+        print(f"[scanner] URL: {session.get('url', '')}")
 
-        final = self._client.poll_session(
+        # Wait for session to be ready
+        print("[scanner] Waiting for session to initialise ...")
+        phase0_start = time.monotonic()
+
+        def _setup_status(sess: dict[str, Any]) -> None:
+            elapsed = time.monotonic() - phase0_start
+            status = sess.get("status", "")
+            detail = sess.get("status_detail", "")
+            print(
+                f"  [{_fmt_elapsed(elapsed)}] {status}"
+                f" ({detail})  | Initialising session ..."
+            )
+
+        self._client.poll_session(
             session_id,
             interval=poll_interval,
             timeout=poll_timeout,
-            on_update=on_status_update,
+            on_update=_setup_status,
         )
 
-        structured = final.get("structured_output")
-        if structured is None:
-            raise RuntimeError(
-                f"Session {session_id} finished but produced no structured output. "
-                f"Final status: {final.get('status')}/{final.get('status_detail')}"
+        # ---- Phase 1: Send discovery prompt ----
+        print("[scanner] Phase 1: discovering .py files ...")
+        discovery_prompt = _DISCOVERY_PROMPT.format(repo=repo)
+        self._client.send_message(session_id, discovery_prompt)
+
+        phase1_start = time.monotonic()
+
+        def _discovery_status(sess: dict[str, Any]) -> None:
+            elapsed = time.monotonic() - phase1_start
+            status = sess.get("status", "")
+            detail = sess.get("status_detail", "")
+            print(
+                f"  [{_fmt_elapsed(elapsed)}] {status}"
+                f" ({detail})  | Phase 1: listing files ..."
             )
 
-        enriched = _enrich_results(structured, session_id=session_id, repo=repo)
+        self._client.poll_session(
+            session_id,
+            interval=poll_interval,
+            timeout=poll_timeout,
+            on_update=_discovery_status,
+            expect_running_first=True,
+        )
 
-        print("[scanner] Scan complete. Results:")
+        # Fetch conversation via V1 to get Devin's actual text response
+        # (the v3 GET session endpoint does not include message content).
+        v1_session = self._client.get_session_v1(session_id)
+        file_list = self._parse_discovery_response(v1_session)
+        total_files = len(file_list)
+        print(f"[scanner] Discovery complete: {total_files} .py files found.")
+
+        if total_files == 0:
+            print("[scanner] No .py files found — nothing to scan.")
+            print("[scanner] Sending session to sleep ...")
+            self._client.send_message(session_id, "sleep")
+            return _enrich_results(
+                {
+                    "repo": repo,
+                    "feature_flags": [],
+                    "dead_code": [],
+                    "tech_debt": [],
+                    "summary": {
+                        "files_scanned": 0,
+                        "total_feature_flags": 0,
+                        "total_dead_code": 0,
+                        "total_tech_debt": 0,
+                        "high_priority_items": [],
+                    },
+                },
+                session_id=session_id,
+                repo=repo,
+                total_files=0,
+            )
+
+        # ---- Phase 2: Send batch scan prompts ----
+        batches = _chunk_list(file_list, batch_size)
+        total_batches = len(batches)
+        print(
+            f"[scanner] Scanning in {total_batches} batch(es) "
+            f"of up to {batch_size} files each."
+        )
+
+        if on_progress is not None:
+            on_progress(0, total_files, 0, total_batches, None)
+
+        all_flags: list[dict[str, Any]] = []
+        all_dead: list[dict[str, Any]] = []
+        all_debt: list[dict[str, Any]] = []
+        all_high_pri: list[str] = []
+        files_done = 0
+
+        for batch_idx, batch_files in enumerate(batches, start=1):
+            print(
+                f"\n[scanner] --- Batch {batch_idx}/{total_batches} "
+                f"({len(batch_files)} files) ---"
+            )
+
+            # Send batch scan prompt as a follow-up message
+            file_list_str = "\n".join(f"- ``{f}``" for f in batch_files)
+            batch_prompt = _BATCH_SCAN_PROMPT.format(
+                file_list=file_list_str, file_count=len(batch_files)
+            )
+            self._client.send_message(session_id, batch_prompt)
+
+            # Wait for Devin to finish processing this batch.
+            # The on_update callback fetches V1 messages to count
+            # [SCANNED] markers for real per-file progress.
+            batch_start = time.monotonic()
+
+            def _batch_status(
+                sess: dict[str, Any],
+                _bidx: int = batch_idx,
+                _btot: int = total_batches,
+                _fdone: int = files_done,
+                _ftot: int = total_files,
+                _bstart: float = batch_start,
+                _bfiles: list[str] = batch_files,
+                _sid: str = session_id,
+            ) -> None:
+                elapsed = time.monotonic() - _bstart
+                status = sess.get("status", "")
+                detail = sess.get("status_detail", "")
+
+                # Fetch V1 messages to count [SCANNED] markers.
+                # NOTE: The V1 messages API only exposes *complete*
+                # messages.  While Devin is "working" its response is
+                # still being generated, so markers won't appear until
+                # the batch finishes (status → waiting_for_user).
+                # We still check every poll so the count updates as
+                # soon as the response is finalised.
+                batch_scanned = 0
+                try:
+                    v1 = self._client.get_session_v1(_sid)
+                    batch_scanned = self._count_scanned_files(v1, _bfiles)
+                except Exception:
+                    pass  # Non-critical; fall back to 0
+
+                cur_files = _fdone + batch_scanned
+                pct = min(100, int(cur_files / _ftot * 100)) if _ftot > 0 else 0
+                print(
+                    f"  [{_fmt_elapsed(elapsed)}] {status}"
+                    f" ({detail})"
+                    f"  | Batch {_bidx}/{_btot}"
+                    f"  | Files: {cur_files}/{_ftot} ({pct}%)"
+                )
+
+            self._client.poll_session(
+                session_id,
+                interval=poll_interval,
+                timeout=poll_timeout,
+                on_update=_batch_status,
+                expect_running_first=True,
+            )
+
+            # Fetch conversation via V1 to get Devin's latest text response
+            v1_session = self._client.get_session_v1(session_id)
+            batch_result = self._parse_batch_response(v1_session)
+
+            # Accumulate findings
+            all_flags.extend(batch_result.get("feature_flags", []))
+            all_dead.extend(batch_result.get("dead_code", []))
+            all_debt.extend(batch_result.get("tech_debt", []))
+            batch_summary = batch_result.get("summary", {})
+            all_high_pri.extend(batch_summary.get("high_priority_items", []))
+
+            files_done += len(batch_files)
+
+            if on_progress is not None:
+                on_progress(files_done, total_files, batch_idx, total_batches, None)
+
+        # ---- Assemble final output ----
+        combined: dict[str, Any] = {
+            "repo": repo,
+            "feature_flags": all_flags,
+            "dead_code": all_dead,
+            "tech_debt": all_debt,
+            "summary": {
+                "total_files": total_files,
+                "files_scanned": files_done,
+                "total_feature_flags": len(all_flags),
+                "total_dead_code": len(all_dead),
+                "total_tech_debt": len(all_debt),
+                "high_priority_items": all_high_pri,
+            },
+        }
+
+        enriched = _enrich_results(
+            combined,
+            session_id=session_id,
+            repo=repo,
+            total_files=total_files,
+        )
+
+        # ---- Put the session to sleep so it doesn't linger ----
+        print("[scanner] Sending session to sleep ...")
+        self._client.send_message(session_id, "sleep")
+
+        print("\n[scanner] All batches complete. Results:")
         print(json.dumps(enriched, indent=2))
         return enriched
+
+    # ------------------------------------------------------------------
+    # Response parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _count_scanned_files(
+        v1_session: dict[str, Any],
+        batch_files: list[str],
+    ) -> int:
+        """Count how many ``[SCANNED] <file>`` markers Devin has printed
+        so far in the **current batch** by scanning the V1 messages list.
+
+        Only counts files that belong to *batch_files* so that markers
+        from previous batches are not double-counted.
+        """
+        batch_set = set(batch_files)
+        scanned: set[str] = set()
+        for msg in v1_session.get("messages") or []:
+            if msg.get("type") != "devin_message":
+                continue
+            text = msg.get("message", "")
+            for match in _SCANNED_RE.finditer(text):
+                path = match.group(1)
+                if path in batch_set:
+                    scanned.add(path)
+        return len(scanned)
+
+    @staticmethod
+    def _last_devin_message(session: dict[str, Any]) -> str:
+        """Return the text of the most recent ``devin_message`` in the
+        V1 session response's ``messages`` list.
+        """
+        messages = session.get("messages") or []
+        for msg in reversed(messages):
+            if msg.get("type") == "devin_message":
+                return msg.get("message", "")
+        return ""
+
+    def _parse_discovery_response(self, session: dict[str, Any]) -> list[str]:
+        """Extract the file list from the discovery session response.
+
+        Uses the V1 session response which includes the full
+        ``messages`` list.  Tries structured_output first, then
+        parses JSON from Devin's last message.
+        """
+        # Try structured output
+        structured = session.get("structured_output")
+        if structured is not None:
+            files = structured.get("files")
+            if isinstance(files, list) and len(files) > 0:
+                return files
+
+        # Parse JSON from Devin's last message in the conversation
+        last_text = self._last_devin_message(session)
+        parsed = _extract_json_block(last_text)
+        if parsed and "files" in parsed:
+            return parsed["files"]
+
+        raise RuntimeError(
+            f"Could not extract file list from discovery response. "
+            f"Status: {session.get('status')}/{session.get('status_detail')}"
+        )
+
+    def _parse_batch_response(self, session: dict[str, Any]) -> dict[str, Any]:
+        """Extract batch scan results from the session response.
+
+        Uses the V1 session response which includes the full
+        ``messages`` list.  Tries structured_output first, then
+        parses JSON from Devin's last message.
+        """
+        structured = session.get("structured_output")
+        if structured is not None:
+            # The structured output should contain the scan results
+            if structured.get("feature_flags") is not None:
+                return structured
+
+        # Fallback: parse JSON from Devin's last message
+        last_text = self._last_devin_message(session)
+        parsed = _extract_json_block(last_text)
+        if parsed and "feature_flags" in parsed:
+            return parsed
+
+        # Last resort: empty result
+        return {
+            "feature_flags": [],
+            "dead_code": [],
+            "tech_debt": [],
+            "summary": {
+                "files_scanned": 0,
+                "total_feature_flags": 0,
+                "total_dead_code": 0,
+                "total_tech_debt": 0,
+                "high_priority_items": [],
+            },
+        }

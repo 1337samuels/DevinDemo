@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
+from datetime import datetime, timezone
 
 from src.api.client import DevinAPIClient, DevinAPIError
 from src.reporter.reporter import DebtReporter
@@ -19,27 +22,163 @@ from src.scanner.identifier import FeatureFlagScanner
 from src.validator.validator import LegacyCodeValidator
 
 
-def _status_callback(session: dict) -> None:
-    """Print a one-liner whenever the session status changes."""
-    status = session.get("status", "?")
-    detail = session.get("status_detail", "")
-    sid = session.get("session_id", "?")
-    suffix = f" ({detail})" if detail else ""
-    print(f"[poll] {sid}: {status}{suffix}")
+class ProgressTracker:
+    """Batch-level progress callback for the two-phase scanner.
+
+    Displays accurate progress between batches:
+    - Files completed vs total (exact percentage)
+    - Batch N / M
+    - Elapsed time and ETA based on actual batch completion rate
+    """
+
+    def __init__(self) -> None:
+        self._start = time.monotonic()
+        self._first_batch_time: float | None = None
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s" if m else f"{s}s"
+
+    def __call__(
+        self,
+        done_files: int,
+        total_files: int,
+        batch_idx: int,
+        total_batches: int,
+        batch_session: dict | None,
+    ) -> None:
+        elapsed = time.monotonic() - self._start
+
+        # Record when the first batch finishes (batch_idx >= 1)
+        if batch_idx >= 1 and self._first_batch_time is None:
+            self._first_batch_time = time.monotonic()
+
+        # Progress percentage
+        if total_files > 0:
+            pct = min(100, int(done_files / total_files * 100))
+            files_str = f"{done_files}/{total_files} ({pct}%)"
+        else:
+            files_str = str(done_files)
+
+        batch_str = f"Batch {batch_idx}/{total_batches}"
+
+        # ETA based on batch completion rate
+        eta_str = "calculating ..."
+        if done_files > 0 and self._first_batch_time is not None:
+            scan_elapsed = time.monotonic() - self._first_batch_time
+            if scan_elapsed > 0:
+                rate = done_files / scan_elapsed  # files per second
+                remaining = total_files - done_files
+                if remaining <= 0:
+                    eta_str = "done"
+                else:
+                    eta_str = f"~{self._fmt_elapsed(remaining / rate)}"
+
+        print(
+            f"  [{self._fmt_elapsed(elapsed)}] {batch_str}"
+            f"  | Files: {files_str}"
+            f"  | ETA: {eta_str}"
+        )
+
+
+class ValidationProgressTracker:
+    """Stateful callback for validation session polling.
+
+    Displays:
+    - Elapsed time and session status
+    - Candidates validated so far (from partial structured output)
+    - Confidence breakdown (HIGH/MEDIUM/LOW/EXEMPT)
+    - ETA based on candidate completion rate
+    """
+
+    def __init__(self, batch_idx: int, total_batches: int, batch_size: int) -> None:
+        self._start = time.monotonic()
+        self._poll_count = 0
+        self._batch_idx = batch_idx
+        self._total_batches = total_batches
+        self._batch_size = batch_size
+        self._first_candidate_time: float | None = None
+        self._prev_candidates = 0
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m{s:02d}s" if m else f"{s}s"
+
+    def __call__(self, session: dict) -> None:
+        self._poll_count += 1
+        elapsed = time.monotonic() - self._start
+
+        status = session.get("status", "?")
+        detail = session.get("status_detail", "")
+        status_str = f"{status} ({detail})" if detail else status
+
+        output = session.get("structured_output")
+        batch_label = f"Batch {self._batch_idx}/{self._total_batches}"
+
+        if output is None:
+            print(
+                f"  [{self._fmt_elapsed(elapsed)}] {batch_label} | {status_str}"
+                f"  | Waiting for validation to start \u2026"
+            )
+            return
+
+        candidates_done = len(output.get("candidates", []))
+
+        # Record when first candidate finishes
+        if candidates_done > 0 and self._first_candidate_time is None:
+            self._first_candidate_time = time.monotonic()
+
+        # Confidence breakdown
+        counts: dict[str, int] = {}
+        for c in output.get("candidates", []):
+            lvl = c.get("confidence", "?")
+            counts[lvl] = counts.get(lvl, 0) + 1
+        parts = [f"{k}:{v}" for k, v in sorted(counts.items()) if v > 0]
+        conf_str = ", ".join(parts) if parts else "pending"
+
+        # Progress
+        progress_str = f"{candidates_done}/{self._batch_size}"
+
+        # ETA
+        eta_str = "calculating \u2026"
+        if candidates_done > 0 and self._first_candidate_time is not None:
+            scan_elapsed = time.monotonic() - self._first_candidate_time
+            if scan_elapsed > 0:
+                rate = candidates_done / scan_elapsed
+                remaining = self._batch_size - candidates_done
+                if remaining <= 0:
+                    eta_str = "finishing up"
+                else:
+                    eta_str = f"~{self._fmt_elapsed(remaining / rate)}"
+
+        self._prev_candidates = candidates_done
+
+        print(
+            f"  [{self._fmt_elapsed(elapsed)}] {batch_label} | {status_str}"
+            f"  | Candidates: {progress_str}"
+            f"  | Confidence: {conf_str}"
+            f"  | ETA: {eta_str}"
+        )
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run the identification scan (Part 1)."""
-    client = DevinAPIClient(api_key=args.api_key, org_id=args.org_id)
+    client = DevinAPIClient(
+        api_key=args.api_key, org_id=args.org_id, v1_api_key=args.v1_api_key
+    )
     scanner = FeatureFlagScanner(client)
 
+    tracker = ProgressTracker()
     try:
         results = scanner.scan(
             repo=args.repo,
+            batch_size=args.batch_size,
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
             max_acu_limit=args.max_acu,
-            on_status_update=_status_callback,
+            on_progress=tracker,
         )
     except DevinAPIError as exc:
         print(f"Devin API error: {exc}", file=sys.stderr)
@@ -69,10 +208,17 @@ def cmd_scan(args: argparse.Namespace) -> None:
             print(f"    - {item}")
     print("=" * 60)
 
-    if args.output:
-        with open(args.output, "w") as fh:
-            json.dump(results, fh, indent=2)
-        print(f"\nFull results written to {args.output}")
+    output_path = args.output or _default_output_path("scan")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as fh:
+        json.dump(results, fh, indent=2)
+    print(f"\nFull results written to {output_path}")
+
+
+def _default_output_path(prefix: str) -> str:
+    """Generate ``results/<prefix>_YYYYMMDD_HHMMSS.json``."""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return os.path.join("results", f"{prefix}_{ts}.json")
 
 
 def cmd_validate(args: argparse.Namespace) -> None:
@@ -88,7 +234,9 @@ def cmd_validate(args: argparse.Namespace) -> None:
         print(f"Invalid JSON in {args.input}: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    client = DevinAPIClient(api_key=args.api_key, org_id=args.org_id)
+    client = DevinAPIClient(
+        api_key=args.api_key, org_id=args.org_id, v1_api_key=args.v1_api_key
+    )
 
     # Build optional config overrides
     config: dict[str, int] = {}
@@ -107,7 +255,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
             max_acu_limit=args.max_acu,
-            on_status_update=_status_callback,
+            progress_tracker_factory=ValidationProgressTracker,
             max_batch_size=args.max_batch_size,
         )
     except DevinAPIError as exc:
@@ -120,10 +268,11 @@ def cmd_validate(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(3)
 
-    if args.output:
-        with open(args.output, "w") as fh:
-            json.dump(results, fh, indent=2)
-        print(f"\nFull validated results written to {args.output}")
+    output_path = args.output or _default_output_path("validate")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as fh:
+        json.dump(results, fh, indent=2)
+    print(f"\nFull validated results written to {output_path}")
 
 
 def cmd_cleanup(args: argparse.Namespace) -> None:
@@ -190,7 +339,12 @@ def _add_devin_api_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--api-key",
         required=True,
-        help="Devin service user API key (starts with cog_).",
+        help="Devin service user API key (starts with cog_) for the v3 API.",
+    )
+    parser.add_argument(
+        "--v1-api-key",
+        required=True,
+        help="Devin legacy API key (starts with apk_) for v1 send_message.",
     )
     parser.add_argument(
         "--org-id",
@@ -211,6 +365,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_devin_api_args(scan_p)
     scan_p.add_argument("repo", help="GitHub repo in owner/repo format.")
     scan_p.add_argument("--output", "-o", help="Write full JSON results to this file.")
+    scan_p.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="Max files per batch scan session (default: 10).",
+    )
     scan_p.add_argument(
         "--poll-interval",
         type=int,
