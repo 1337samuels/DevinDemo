@@ -365,6 +365,47 @@
             justify-content: space-between;
             grid-column: 1 / -1;
         }
+
+        /* Collapsible additional options */
+        .collapsible-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            grid-column: 1 / -1;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.5rem 0.75rem;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+            margin-top: 0.25rem;
+        }
+
+        .collapsible-toggle:hover {
+            color: var(--text);
+            border-color: var(--accent);
+        }
+
+        .collapsible-toggle .arrow {
+            transition: transform 0.2s;
+            font-size: 0.625rem;
+        }
+
+        .collapsible-toggle.open .arrow {
+            transform: rotate(90deg);
+        }
+
+        .collapsible-content {
+            display: none;
+            grid-column: 1 / -1;
+        }
+
+        .collapsible-content.open {
+            display: contents;
+        }
     </style>
 </head>
 <body>
@@ -430,20 +471,6 @@
         <!-- Phase 2: Validate -->
         <div class="phase-panel" id="panel-validate">
             <div class="form-grid">
-                <div class="section-label">Devin API</div>
-                <div class="form-group">
-                    <label>API Key (v3) <span class="required">*</span></label>
-                    <input type="password" id="validate-api-key" placeholder="cog_..." />
-                </div>
-                <div class="form-group">
-                    <label>API Key (v1) <span class="required">*</span></label>
-                    <input type="password" id="validate-v1-api-key" placeholder="apk_..." />
-                </div>
-                <div class="form-group">
-                    <label>Organization ID <span class="required">*</span></label>
-                    <input type="text" id="validate-org-id" placeholder="org-..." />
-                </div>
-
                 <div class="section-label">Validation Configuration</div>
                 <div class="form-group">
                     <label>Input File (Phase 1 Scan Results) <span class="required">*</span></label>
@@ -456,26 +483,6 @@
                         </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Output File</label>
-                    <input type="text" id="validate-output" placeholder="Auto-generated if empty" />
-                </div>
-                <div class="form-group">
-                    <label>Poll Interval (s)</label>
-                    <input type="number" id="validate-poll-interval" placeholder="15" />
-                </div>
-                <div class="form-group">
-                    <label>Poll Timeout (s)</label>
-                    <input type="number" id="validate-poll-timeout" placeholder="900" />
-                </div>
-                <div class="form-group">
-                    <label>Max ACU</label>
-                    <input type="number" id="validate-max-acu" placeholder="Optional" />
-                </div>
-                <div class="form-group">
-                    <label>Max Batch Size</label>
-                    <input type="number" id="validate-max-batch-size" placeholder="5" />
-                </div>
 
                 <div class="layer-header">
                     <div class="section-label" style="margin:0;">Validation Layers</div>
@@ -487,18 +494,59 @@
                     </div>
                 </div>
 
-                <div class="section-label">Advanced Overrides</div>
-                <div class="form-group">
-                    <label>Staleness Days</label>
-                    <input type="number" id="validate-staleness-days" placeholder="365" />
-                </div>
-                <div class="form-group">
-                    <label>PR Lookback Days</label>
-                    <input type="number" id="validate-pr-lookback-days" placeholder="90" />
-                </div>
-                <div class="form-group">
-                    <label>Issue Lookback Days</label>
-                    <input type="number" id="validate-issue-lookback-days" placeholder="180" />
+                <button type="button" class="collapsible-toggle" id="validate-additional-toggle" onclick="toggleAdditionalOptions()">
+                    <span class="arrow">&#9654;</span> Additional Options
+                </button>
+                <div class="collapsible-content" id="validate-additional-content">
+                    <div class="section-label">Devin API</div>
+                    <div class="form-group">
+                        <label>API Key (v3) <span class="required">*</span></label>
+                        <input type="password" id="validate-api-key" placeholder="cog_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>API Key (v1) <span class="required">*</span></label>
+                        <input type="password" id="validate-v1-api-key" placeholder="apk_..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Organization ID <span class="required">*</span></label>
+                        <input type="text" id="validate-org-id" placeholder="org-..." />
+                    </div>
+
+                    <div class="section-label">Output &amp; Polling</div>
+                    <div class="form-group">
+                        <label>Output File</label>
+                        <input type="text" id="validate-output" placeholder="Auto-generated if empty" />
+                    </div>
+                    <div class="form-group">
+                        <label>Poll Interval (s)</label>
+                        <input type="number" id="validate-poll-interval" placeholder="15" />
+                    </div>
+                    <div class="form-group">
+                        <label>Poll Timeout (s)</label>
+                        <input type="number" id="validate-poll-timeout" placeholder="900" />
+                    </div>
+                    <div class="form-group">
+                        <label>Max ACU</label>
+                        <input type="number" id="validate-max-acu" placeholder="Optional" />
+                    </div>
+                    <div class="form-group">
+                        <label>Max Batch Size</label>
+                        <input type="number" id="validate-max-batch-size" placeholder="5" />
+                    </div>
+
+                    <div class="section-label">Advanced Overrides</div>
+                    <div class="form-group">
+                        <label>Staleness Days</label>
+                        <input type="number" id="validate-staleness-days" placeholder="365" />
+                    </div>
+                    <div class="form-group">
+                        <label>PR Lookback Days</label>
+                        <input type="number" id="validate-pr-lookback-days" placeholder="90" />
+                    </div>
+                    <div class="form-group">
+                        <label>Issue Lookback Days</label>
+                        <input type="number" id="validate-issue-lookback-days" placeholder="180" />
+                    </div>
                 </div>
             </div>
         </div>
@@ -618,6 +666,13 @@
             } catch (err) {
                 container.innerHTML = '<span style="color:var(--red);font-size:0.8rem;">Failed to load layers</span>';
             }
+        }
+
+        function toggleAdditionalOptions() {
+            const toggle = document.getElementById('validate-additional-toggle');
+            const content = document.getElementById('validate-additional-content');
+            toggle.classList.toggle('open');
+            content.classList.toggle('open');
         }
 
         function toggleAllLayers() {
