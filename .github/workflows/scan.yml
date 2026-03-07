@@ -14,7 +14,7 @@ on:
       phases:
         description: 'Comma-separated phases to run: scan,validate,cleanup,report'
         required: false
-        default: 'scan'
+        default: 'scan,validate,cleanup,report'
         type: string
       scan_input:
         description: 'Path to existing scan results (for validate/cleanup/report phases)'
@@ -24,7 +24,7 @@ on:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -57,7 +57,7 @@ jobs:
         id: phases
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            PHASES="scan"
+            PHASES="scan,validate,cleanup,report"
           else
             PHASES="${{ inputs.phases }}"
           fi
