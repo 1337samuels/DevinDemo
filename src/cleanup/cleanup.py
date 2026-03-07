@@ -545,6 +545,20 @@ class CleanupPRGenerator:
                     "line": line,
                 })
 
+        # ---- Record ACU usage before sleeping ----
+        try:
+            final_session = self._client.get_session(session_id)
+            from src.tracking.acu_tracker import ACUTracker, extract_acu_from_session
+            acu_used = extract_acu_from_session(final_session)
+            if acu_used > 0:
+                acu_tracker = ACUTracker()
+                acu_tracker.record(session_id, "cleanup", acu_used, repo=repo)
+                print(f"[cleanup] ACU used: {acu_used}")
+            else:
+                print("[cleanup] ACU used: 0 (not reported by API)")
+        except Exception as exc:
+            print(f"[cleanup] Warning: could not record ACU usage: {exc}")
+
         # ---- Send session to sleep ----
         print("\n[cleanup] Sending session to sleep ...")
         self._client.archive_session(session_id)

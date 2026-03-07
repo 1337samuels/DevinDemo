@@ -205,6 +205,22 @@ def api_repos():
     return jsonify(_discover_all_repos())
 
 
+@app.route("/api/acu-summary")
+def api_acu_summary():
+    """Return ACU usage summary for the dashboard.
+
+    Response: {"total_acu": float, "by_phase": {"scan": float, ...}, "recent": [...]}
+    """
+    from src.tracking.acu_tracker import ACUTracker
+
+    tracker = ACUTracker(os.path.join(RESULTS_DIR, "acu_history.json"))
+    return jsonify({
+        "total_acu": round(tracker.get_total(), 4),
+        "by_phase": {k: round(v, 4) for k, v in tracker.get_by_phase().items()},
+        "recent": tracker.get_history(limit=20),
+    })
+
+
 @app.route("/api/results/<prefix>")
 def api_results(prefix: str):
     """Return available result files for a given phase prefix.
