@@ -199,8 +199,12 @@ def _layer_supports_removal(
     ):
         return not bool(value)
 
-    # Layer 5 uses a string enum
+    # Layer 5 uses a string enum.  Fall back to the short key name
+    # ``sentiment`` for results generated before the prompt was fixed to
+    # use ``overall_sentiment``.
     if layer_key == "layer_5_issue_archaeology":
+        if value is None and "sentiment" in layer_data:
+            value = layer_data["sentiment"]
         return value in ("supports_removal", "no_discussion")
 
     return False
