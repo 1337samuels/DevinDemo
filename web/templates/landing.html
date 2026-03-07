@@ -303,6 +303,121 @@
             border-color: var(--accent);
         }
 
+        .layer-card {
+            position: relative;
+            cursor: default;
+        }
+
+        .layer-card .tooltip {
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            bottom: calc(100% + 10px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #22263a;
+            border: 1px solid var(--accent);
+            border-radius: var(--radius);
+            padding: 0.75rem 1rem;
+            width: 260px;
+            font-size: 0.75rem;
+            color: var(--text);
+            line-height: 1.5;
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 0.2s, visibility 0.2s;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+
+        .layer-card .tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: var(--accent);
+        }
+
+        .layer-card:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        /* ---- Phase detail sections ---- */
+        .phase-detail {
+            max-width: 1050px;
+            margin: 0 auto 2.5rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 800px) {
+            .phase-detail { grid-template-columns: 1fr; }
+        }
+
+        .phase-detail-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+        }
+
+        .phase-detail-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .phase-detail-card ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .phase-detail-card ul li {
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            padding: 0.375rem 0;
+            padding-left: 1.25rem;
+            position: relative;
+        }
+
+        .phase-detail-card ul li::before {
+            content: '\2022';
+            position: absolute;
+            left: 0;
+            color: var(--accent);
+        }
+
+        .auto-merge-note {
+            display: inline-block;
+            font-size: 0.6875rem;
+            color: var(--yellow);
+            border: 1px solid rgba(234,179,8,0.3);
+            background: rgba(234,179,8,0.08);
+            padding: 0.15rem 0.5rem;
+            border-radius: 999px;
+            margin-left: 0.25rem;
+        }
+
+        .mini-arrow {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.75rem 0;
+            font-size: 0.8125rem;
+            color: var(--text);
+        }
+
+        .mini-arrow .arr {
+            color: var(--orange);
+            font-weight: 700;
+        }
+
         .layer-card .layer-icon {
             font-size: 1.5rem;
             margin-bottom: 0.375rem;
@@ -426,10 +541,6 @@
             <a href="/dashboard" class="btn btn-primary">
                 <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
                 Open Dashboard &amp; C&amp;C
-            </a>
-            <a href="#pipeline" class="btn btn-outline">
-                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-                See How It Works
             </a>
         </div>
     </section>
@@ -565,13 +676,11 @@
                 <line x1="836" y1="380" x2="836" y2="410" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow-green)"/>
 
                 <!-- OUTPUT BOXES -->
-                <rect x="720" y="413" width="100" height="36" rx="6" fill="#22263a" stroke="#2a2e3e"/>
-                <text x="762" y="425" text-anchor="middle" fill="#8b8fa3" font-size="8" font-weight="600">NOTION</text>
-                <text x="770" y="440" text-anchor="middle" fill="#e1e4ed" font-size="18">&#128221;</text>
+                <rect x="730" y="413" width="90" height="32" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="775" y="434" text-anchor="middle" fill="#e1e4ed" font-size="11" font-weight="600">Notion</text>
 
-                <rect x="835" y="413" width="100" height="36" rx="6" fill="#22263a" stroke="#2a2e3e"/>
-                <text x="877" y="425" text-anchor="middle" fill="#8b8fa3" font-size="8" font-weight="600">SLACK</text>
-                <text x="885" y="440" text-anchor="middle" fill="#e1e4ed" font-size="18">&#128172;</text>
+                <rect x="840" y="413" width="90" height="32" rx="6" fill="#22263a" stroke="#2a2e3e"/>
+                <text x="885" y="434" text-anchor="middle" fill="#e1e4ed" font-size="11" font-weight="600">Slack</text>
 
                 <!-- ---- GITHUB PR output from Phase 3 ---- -->
                 <line x1="723" y1="258" x2="780" y2="258" stroke="#f97316" stroke-width="1.2" marker-end="url(#arrow-orange)"/>
@@ -589,10 +698,6 @@
                 <path d="M480 410 L480 400 L458 400 L458 210" fill="none" stroke="#06b6d4" stroke-width="1" stroke-dasharray="3" opacity="0.5"/>
                 <path d="M480 410 L480 400 L648 400 L648 295" fill="none" stroke="#f97316" stroke-width="1" stroke-dasharray="3" opacity="0.5"/>
 
-                <!-- Labels on dashed lines -->
-                <text x="270" y="395" text-anchor="end" fill="#6366f1" font-size="8" opacity="0.7">create_session</text>
-                <text x="450" y="395" text-anchor="end" fill="#06b6d4" font-size="8" opacity="0.7">send_message</text>
-                <text x="660" y="395" text-anchor="start" fill="#f97316" font-size="8" opacity="0.7">send_message</text>
 
                 <!-- Arrow markers -->
                 <defs>
@@ -605,49 +710,84 @@
         </div>
     </section>
 
+    <!-- ===== PHASE 1 & 3 DETAIL BOXES ===== -->
+    <section class="section">
+        <div class="phase-detail">
+            <div class="phase-detail-card" style="border-color:#6366f1;">
+                <h3><span style="color:#6366f1;">Phase 1: Scan</span> &mdash; Candidate Detection</h3>
+                <ul>
+                    <li>Feature flags: env-var checks, boolean config gates, on/off switches</li>
+                    <li>Dead code: unreachable branches, unused functions/classes, unused imports</li>
+                    <li>Commented-out code blocks (&ge;3 lines of former source)</li>
+                    <li>Tech debt: TODO / FIXME / HACK markers, deprecated APIs, compat shims</li>
+                </ul>
+            </div>
+            <div class="phase-detail-card" style="border-color:#f97316;">
+                <h3><span style="color:#f97316;">Phase 3: Cleanup</span> &mdash; PR Generation</h3>
+                <div class="mini-arrow">
+                    Validated Issues <span class="arr">&rarr;</span> GitHub Pull Requests
+                </div>
+                <ul>
+                    <li>High-confidence issues generate cleanup PRs automatically</li>
+                    <li>Each PR scoped to a single candidate with clear description</li>
+                    <li>Auto-merge for issues that passed all 8 layers <span class="auto-merge-note">optional &mdash; auto-merge</span></li>
+                    <li>Low-confidence issues flagged for manual review only</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
     <!-- ===== 8 VERIFICATION LAYERS ===== -->
     <section class="section">
         <h2 class="section-title">8 Verification Layers (Phase 2)</h2>
         <div class="layers-grid">
             <div class="layer-card">
                 <span class="layer-icon">&#128270;</span>
-                <div class="layer-name">Static Analysis</div>
+                <div class="layer-name">Re-Confirm Detection</div>
                 <div class="layer-num-badge">Layer 1</div>
+                <div class="tooltip">Verify the detection is real code (not a comment, string, or docstring). Cross-check with additional file references.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#9200;</span>
-                <div class="layer-name">Staleness Check</div>
+                <div class="layer-name">Git History Staleness</div>
                 <div class="layer-num-badge">Layer 2</div>
+                <div class="tooltip">Check when the code was last meaningfully edited. Filter out bulk/cosmetic commits. Flag as stale if untouched for &gt;365 days.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128101;</span>
                 <div class="layer-name">Active Development</div>
                 <div class="layer-num-badge">Layer 3</div>
+                <div class="tooltip">Search for open PRs or recent branches that touch this code. If someone is actively working on it, lower the removal confidence.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128279;</span>
-                <div class="layer-name">Dependency Graph</div>
+                <div class="layer-name">Static Reachability</div>
                 <div class="layer-num-badge">Layer 4</div>
+                <div class="tooltip">Trace call chains from entry points. Check if any execution path can reach this code. Detect framework patterns that may hide usage.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#127919;</span>
-                <div class="layer-name">Runtime / Coverage</div>
+                <div class="layer-name">Issue Archaeology</div>
                 <div class="layer-num-badge">Layer 5</div>
+                <div class="tooltip">Search issues, PR comments, and commit messages for discussions about this code. Determine community sentiment toward removal.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128218;</span>
-                <div class="layer-name">Documentation</div>
+                <div class="layer-name">Test Coverage</div>
                 <div class="layer-num-badge">Layer 6</div>
+                <div class="tooltip">Check if any tests directly reference or exercise this code. Identify test files that would break if the candidate is removed.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128640;</span>
-                <div class="layer-name">Feature Flags</div>
+                <div class="layer-name">Runtime Signals</div>
                 <div class="layer-num-badge">Layer 7</div>
+                <div class="tooltip">Look for flag evaluation counts, APM invocation data, and references in deployment/infra configs that indicate runtime usage.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128736;</span>
-                <div class="layer-name">Cross-Reference</div>
+                <div class="layer-name">External Consumers</div>
                 <div class="layer-num-badge">Layer 8</div>
+                <div class="tooltip">Check if the symbol is exported, part of a published package, or consumed by external repos/services. Flag API endpoints.</div>
             </div>
         </div>
     </section>
