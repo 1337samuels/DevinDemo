@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -213,6 +214,9 @@ class SlackNotifier:
     ) -> None:
         """Upload one or more files to the configured Slack channel.
 
+        Uses the V2 upload flow (``files.getUploadURLExternal`` →
+        PUT file content → ``files.completeUploadExternal``).
+
         Requires ``bot_token`` and ``channel_id`` to be set.  If either
         is missing the call is silently skipped (the webhook-only flow
         remains fully functional).
@@ -234,74 +238,117 @@ class SlackNotifier:
                 continue
 
             filename = os.path.basename(fpath)
+            file_size = os.path.getsize(fpath)
             with open(fpath, "rb") as fh:
                 file_content = fh.read()
 
-            # Use Slack files.upload API (v1 — widely supported)
-            boundary = "----SlackFileUploadBoundary"
-            body_parts: list[bytes] = []
+            # Step 1: Get a pre-signed upload URL from Slack
+            upload_url, file_id = self._get_upload_url(filename, file_size)
 
-            # channel field
-            body_parts.append(f"--{boundary}\r\n".encode())
-            body_parts.append(b"Content-Disposition: form-data; name=\"channels\"\r\n\r\n")
-            body_parts.append(f"{self._channel_id}\r\n".encode())
+            # Step 2: Upload the file content to the pre-signed URL
+            self._put_file_content(upload_url, file_content, filename)
 
-            # filename field
-            body_parts.append(f"--{boundary}\r\n".encode())
-            body_parts.append(b"Content-Disposition: form-data; name=\"filename\"\r\n\r\n")
-            body_parts.append(f"{filename}\r\n".encode())
+            # Step 3: Finalize the upload and share to the channel
+            self._complete_upload(file_id, filename, comment)
 
-            # title field
-            body_parts.append(f"--{boundary}\r\n".encode())
-            body_parts.append(b"Content-Disposition: form-data; name=\"title\"\r\n\r\n")
-            body_parts.append(f"{filename}\r\n".encode())
+            print(f"[slack] Uploaded {filename} to channel {self._channel_id}")
 
-            # initial_comment field
-            if comment:
-                body_parts.append(f"--{boundary}\r\n".encode())
-                body_parts.append(b"Content-Disposition: form-data; name=\"initial_comment\"\r\n\r\n")
-                body_parts.append(f"{comment}\r\n".encode())
+    def _get_upload_url(self, filename: str, length: int) -> tuple[str, str]:
+        """Call ``files.getUploadURLExternal`` to obtain a pre-signed URL.
 
-            # filetype
-            body_parts.append(f"--{boundary}\r\n".encode())
-            body_parts.append(b"Content-Disposition: form-data; name=\"filetype\"\r\n\r\n")
-            body_parts.append(b"json\r\n")
+        Returns:
+            A tuple of ``(upload_url, file_id)``.
+        """
+        params = urllib.parse.urlencode({
+            "filename": filename,
+            "length": length,
+        }).encode()
 
-            # file content
-            body_parts.append(f"--{boundary}\r\n".encode())
-            body_parts.append(
-                f"Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n".encode()
-            )
-            body_parts.append(b"Content-Type: application/json\r\n\r\n")
-            body_parts.append(file_content)
-            body_parts.append(b"\r\n")
+        req = urllib.request.Request(
+            "https://slack.com/api/files.getUploadURLExternal",
+            data=params,
+            headers={
+                "Authorization": f"Bearer {self._bot_token}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                result = json.loads(resp.read().decode())
+                if not result.get("ok"):
+                    err = result.get("error", "unknown")
+                    raise SlackNotifyError(
+                        200, f"files.getUploadURLExternal failed: {err}",
+                    )
+                return result["upload_url"], result["file_id"]
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode() if exc.fp else ""
+            raise SlackNotifyError(exc.code, str(exc.reason), body) from exc
+        except urllib.error.URLError as exc:
+            raise SlackNotifyError(0, str(exc.reason)) from exc
 
-            # closing boundary
-            body_parts.append(f"--{boundary}--\r\n".encode())
+    def _put_file_content(
+        self, upload_url: str, content: bytes, filename: str,
+    ) -> None:
+        """Upload the raw file bytes to the Slack-provided URL."""
+        req = urllib.request.Request(
+            upload_url,
+            data=content,
+            headers={
+                "Content-Type": "application/octet-stream",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                resp.read()
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode() if exc.fp else ""
+            raise SlackNotifyError(
+                exc.code,
+                f"File content upload failed for {filename}: {exc.reason}",
+                body,
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise SlackNotifyError(
+                0, f"File content upload failed for {filename}: {exc.reason}",
+            ) from exc
 
-            data = b"".join(body_parts)
+    def _complete_upload(
+        self, file_id: str, title: str, comment: str = "",
+    ) -> None:
+        """Call ``files.completeUploadExternal`` to finalize and share."""
+        payload: dict[str, Any] = {
+            "files": [{"id": file_id, "title": title}],
+            "channel_id": self._channel_id,
+        }
+        if comment:
+            payload["initial_comment"] = comment
 
-            req = urllib.request.Request(
-                "https://slack.com/api/files.upload",
-                data=data,
-                headers={
-                    "Authorization": f"Bearer {self._bot_token}",
-                    "Content-Type": f"multipart/form-data; boundary={boundary}",
-                },
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req) as resp:
-                    result = json.loads(resp.read().decode())
-                    if not result.get("ok"):
-                        err = result.get("error", "unknown")
-                        raise SlackNotifyError(200, f"files.upload failed: {err}")
-                print(f"[slack] Uploaded {filename} to channel {self._channel_id}")
-            except urllib.error.HTTPError as exc:
-                body = exc.read().decode() if exc.fp else ""
-                raise SlackNotifyError(exc.code, str(exc.reason), body) from exc
-            except urllib.error.URLError as exc:
-                raise SlackNotifyError(0, str(exc.reason)) from exc
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            "https://slack.com/api/files.completeUploadExternal",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {self._bot_token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                result = json.loads(resp.read().decode())
+                if not result.get("ok"):
+                    err = result.get("error", "unknown")
+                    raise SlackNotifyError(
+                        200, f"files.completeUploadExternal failed: {err}",
+                    )
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode() if exc.fp else ""
+            raise SlackNotifyError(exc.code, str(exc.reason), body) from exc
+        except urllib.error.URLError as exc:
+            raise SlackNotifyError(0, str(exc.reason)) from exc
 
     def _send(self, payload: dict[str, Any]) -> None:
         """Post a JSON payload to the Slack webhook URL."""
