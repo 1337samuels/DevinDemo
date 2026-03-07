@@ -811,9 +811,15 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>DevinDemo Pipeline</h1>
-            <p>Feature-flag & tech-debt scanner powered by Devin API</p>
+        <header style="display:flex;align-items:center;justify-content:space-between;">
+            <div>
+                <h1>DevinDemo Pipeline</h1>
+                <p>Feature-flag & tech-debt scanner powered by Devin API</p>
+            </div>
+            <a href="/" style="color:var(--accent);font-size:0.875rem;text-decoration:none;border:1px solid var(--border);padding:0.5rem 1rem;border-radius:var(--radius);transition:border-color 0.15s;"
+               onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+                &larr; Overview
+            </a>
         </header>
 
         <!-- Top-level mode tabs -->
