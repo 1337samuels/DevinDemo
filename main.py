@@ -445,6 +445,7 @@ _SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
     "SLACK_WEBHOOKS_URL": ("slack_webhook_url", {"report"}),
     "SLACK_BOT_TOKEN": ("slack_bot_token", {"report"}),
     "SLACK_CHANNEL_ID": ("slack_channel_id", {"report"}),
+    "GITHUB_TOKEN": ("github_token", set()),  # used by web dashboard for PR status checks
 }
 
 
