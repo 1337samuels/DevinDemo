@@ -249,6 +249,67 @@ The GUI is available at **http://localhost:5000**.
 - **Stop button** to terminate a running process
 - **File discovery dropdowns** — for phases that require input files (Validate, Report), the server automatically scans the `results/` directory and presents matching files in a dropdown showing `owner/repo — YYYY-MM-DD HH:MM:SS UTC`. A "Custom path…" option is available as a fallback.
 
+## CI / Scheduled Scanning
+
+A GitHub Actions workflow is included to run the pipeline on a schedule or on
+demand.
+
+### Setting up GitHub Secrets
+
+Go to **Settings > Secrets and variables > Actions > Secrets** and add:
+
+| Secret              | Description                                    |
+|---------------------|------------------------------------------------|
+| `DEVIN_API_KEY_V3`  | Devin service user API key (`cog_*`)           |
+| `DEVIN_API_KEY_V1`  | Devin v1 API key (`apk_*`)                     |
+| `DEVIN_ORG_ID`      | Devin organization ID (`org-*`)                |
+
+For scheduled runs, also set a **repository variable** (Settings > Secrets and
+variables > Actions > Variables):
+
+| Variable             | Description                                   |
+|----------------------|-----------------------------------------------|
+| `DEFAULT_SCAN_REPO`  | Default target repo for weekly scans (e.g. `myorg/myrepo`) |
+
+### Triggering a manual scan
+
+1. Go to **Actions > DevinDemo Pipeline Scan > Run workflow**
+2. Fill in:
+   - **repo**: target repository (e.g. `owner/repo`)
+   - **phases**: comma-separated list (default `scan`), e.g. `scan,validate`
+   - **scan_input** (optional): path to existing scan results for
+     validate/cleanup/report phases
+3. Click **Run workflow**
+
+### Weekly schedule
+
+The workflow runs automatically every **Monday at 9:00 AM UTC**. It uses the
+`DEFAULT_SCAN_REPO` variable and runs the `scan` phase only.
+
+### Downloading artifacts
+
+After each run, the `results/` directory is uploaded as a workflow artifact.
+Go to the workflow run page and download the **pipeline-results-\*** artifact
+to get the JSON output files.
+
+### Pipeline helper script
+
+You can also run the pipeline locally using the helper script:
+
+```bash
+# Run scan only
+./scripts/run_pipeline.sh --repo owner/repo --phases scan
+
+# Run full pipeline
+./scripts/run_pipeline.sh --repo owner/repo --phases scan,validate,cleanup,report
+
+# Run validate + report using existing scan results
+./scripts/run_pipeline.sh --repo owner/repo --phases validate,report --scan-input results/scan_xxx.json
+```
+
+Required environment variables: `DEVIN_API_KEY_V3`, `DEVIN_API_KEY_V1`,
+`DEVIN_ORG_ID`.
+
 ## Project structure
 
 ```
@@ -257,6 +318,11 @@ DevinDemo/
 ├── requirements.txt
 ├── list_sessions.py            # Standalone Devin API session lister (utility)
 ├── send_message.py             # v1 API message sender (Teams workaround)
+├── scripts/
+│   └── run_pipeline.sh         # Pipeline runner (chains phases sequentially)
+├── .github/
+│   └── workflows/
+│       └── scan.yml            # GitHub Actions workflow (scheduled + manual)
 ├── src/
 │   ├── api/
 │   │   └── client.py           # Devin v3 API client wrapper
