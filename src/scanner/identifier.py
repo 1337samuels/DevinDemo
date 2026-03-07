@@ -608,7 +608,7 @@ class FeatureFlagScanner:
                     snippet = latest_msg[:200].replace("\n", " ").strip()
                     if len(latest_msg) > 200:
                         snippet += " ..."
-                    print(f"    └─ Devin: {snippet}")
+                    print(f"    |-- Devin: {snippet}")
 
             self._client.poll_session(
                 session_id,

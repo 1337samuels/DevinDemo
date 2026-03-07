@@ -252,7 +252,7 @@ class CleanupProgressTracker:
                     snippet = latest_msg[:200].replace("\n", " ").strip()
                     if len(latest_msg) > 200:
                         snippet += " ..."
-                    print(f"    \u2514\u2500 Devin: {snippet}")
+                    print(f"    |-- Devin: {snippet}")
             except Exception:
                 pass  # Non-critical
 
