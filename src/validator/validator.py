@@ -1583,6 +1583,20 @@ class LegacyCodeValidator:
                 f"Results for {n_parsed} candidate(s)."
             )
 
+        # ---- Record ACU usage before sleeping ----
+        try:
+            final_session = self._client.get_session(session_id)
+            from src.tracking.acu_tracker import ACUTracker, extract_acu_from_session
+            acu_used = extract_acu_from_session(final_session)
+            if acu_used > 0:
+                acu_tracker = ACUTracker()
+                acu_tracker.record(session_id, "validate", acu_used, repo=repo)
+                print(f"[validator] ACU used: {acu_used}")
+            else:
+                print("[validator] ACU used: 0 (not reported by API)")
+        except Exception as exc:
+            print(f"[validator] Warning: could not record ACU usage: {exc}")
+
         # ---- Send session to sleep ----
         print("[validator] Sending session to sleep ...")
         self._client.send_message(session_id, "sleep")

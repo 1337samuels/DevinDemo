@@ -164,6 +164,11 @@ def cmd_scan(args: argparse.Namespace) -> None:
         print("\n  High-priority items:")
         for item in high_pri:
             print(f"    - {item}")
+
+    # ACU usage for this run
+    from src.tracking.acu_tracker import ACUTracker
+    acu_total = ACUTracker().get_total(repo=results.get("repo", args.repo))
+    print(f"\n  ACU used (cumulative): {round(acu_total, 4)}")
     print("=" * 60)
 
     repo_name = results.get("repo", args.repo)
@@ -248,6 +253,11 @@ def cmd_validate(args: argparse.Namespace) -> None:
     with open(output_path, "w") as fh:
         json.dump(results, fh, indent=2)
     print(f"\nFull validated results written to {output_path}")
+
+    # ACU usage for this run
+    from src.tracking.acu_tracker import ACUTracker
+    acu_total = ACUTracker().get_total(repo=repo_name)
+    print(f"[validate] ACU used (cumulative): {round(acu_total, 4)}")
 
 
 class CleanupProgressTrackerFactory:
@@ -344,6 +354,11 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
         print(f"\nOpened {len(opened)} PR(s):")
         for r in opened:
             print(f"  - {r['candidate_id']}: {r['pr_url']}")
+
+    # ACU usage for this run
+    from src.tracking.acu_tracker import ACUTracker
+    acu_total = ACUTracker().get_total(repo=repo_name)
+    print(f"[cleanup] ACU used (cumulative): {round(acu_total, 4)}")
 
 
 def cmd_report(args: argparse.Namespace) -> None:

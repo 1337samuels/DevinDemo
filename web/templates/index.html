@@ -830,6 +830,28 @@
 
         <!-- Dashboard mode -->
         <div class="mode-panel active" id="mode-dashboard">
+            <!-- ACU Usage Section -->
+            <div id="acu-section" style="margin-bottom:1.5rem;">
+                <div class="dashboard-stats" style="grid-template-columns:repeat(4, 1fr);">
+                    <div class="stat-card">
+                        <div class="stat-value" id="acu-total" style="color:#6366f1;">--</div>
+                        <div class="stat-label">Total ACU Spent</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="acu-scan" style="color:#60a5fa;font-size:1.5rem;">--</div>
+                        <div class="stat-label">Scan (Phase 1)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="acu-validate" style="color:#eab308;font-size:1.5rem;">--</div>
+                        <div class="stat-label">Validate (Phase 2)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="acu-cleanup" style="color:#22c55e;font-size:1.5rem;">--</div>
+                        <div class="stat-label">Cleanup (Phase 3)</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="dashboard-file-selector" style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
                 <div>
                     <label>Repository</label>
@@ -2098,6 +2120,27 @@
                 }
             });
         }
+
+        // ===== ACU SUMMARY =====
+
+        async function loadACUSummary() {
+            try {
+                const resp = await fetch('/api/acu-summary');
+                const data = await resp.json();
+                const totalEl = document.getElementById('acu-total');
+                const scanEl = document.getElementById('acu-scan');
+                const validateEl = document.getElementById('acu-validate');
+                const cleanupEl = document.getElementById('acu-cleanup');
+                if (totalEl) totalEl.textContent = data.total_acu.toFixed(2);
+                if (scanEl) scanEl.textContent = (data.by_phase.scan || 0).toFixed(2);
+                if (validateEl) validateEl.textContent = (data.by_phase.validate || 0).toFixed(2);
+                if (cleanupEl) cleanupEl.textContent = (data.by_phase.cleanup || 0).toFixed(2);
+            } catch (err) {
+                console.warn('Could not load ACU summary:', err);
+            }
+        }
+
+        loadACUSummary();
 
         // Load dashboard data on page load
         loadDashboardRepoSelect();

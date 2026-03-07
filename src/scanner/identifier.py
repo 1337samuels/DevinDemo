@@ -665,6 +665,20 @@ class FeatureFlagScanner:
             total_files=total_files,
         )
 
+        # ---- Record ACU usage before sleeping ----
+        try:
+            final_session = self._client.get_session(session_id)
+            from src.tracking.acu_tracker import ACUTracker, extract_acu_from_session
+            acu_used = extract_acu_from_session(final_session)
+            if acu_used > 0:
+                tracker = ACUTracker()
+                tracker.record(session_id, "scan", acu_used, repo=repo)
+                print(f"[scanner] ACU used: {acu_used}")
+            else:
+                print("[scanner] ACU used: 0 (not reported by API)")
+        except Exception as exc:
+            print(f"[scanner] Warning: could not record ACU usage: {exc}")
+
         # ---- Put the session to sleep so it doesn't linger ----
         print("[scanner] Sending session to sleep ...")
         self._client.send_message(session_id, "sleep")
