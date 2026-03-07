@@ -143,11 +143,11 @@ class ACUTracker:
 def extract_acu_from_session(session: dict[str, Any]) -> float:
     """Extract ACU usage from a Devin API session response.
 
-    The v3 session response may include ``total_acu``,
-    ``acu_used``, or ``acu_usage``.  This helper tries each
-    field name in order and returns ``0.0`` if none are found.
+    The v3 ``SessionResponse`` schema uses ``acus_consumed`` as the
+    canonical field name.  For robustness we also check older/alternate
+    names (``total_acu``, ``acu_used``, ``acu_usage``).
     """
-    for field in ("total_acu", "acu_used", "acu_usage"):
+    for field in ("acus_consumed", "total_acu", "acu_used", "acu_usage"):
         value = session.get(field)
         if value is not None:
             try:
