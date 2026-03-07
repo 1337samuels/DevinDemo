@@ -1496,6 +1496,7 @@ class LegacyCodeValidator:
             # Wait for Devin to finish processing this batch
             batch_start = time.monotonic()
             _poll_count = 0
+            _last_printed_msg = ""
 
             def _batch_status(
                 sess: dict[str, Any],
@@ -1505,7 +1506,7 @@ class LegacyCodeValidator:
                 _bstart: float = batch_start,
                 _sid: str = session_id,
             ) -> None:
-                nonlocal _poll_count
+                nonlocal _poll_count, _last_printed_msg
                 _poll_count += 1
                 elapsed = time.monotonic() - _bstart
                 status = sess.get("status", "")
@@ -1523,7 +1524,8 @@ class LegacyCodeValidator:
                     try:
                         v1 = self._client.get_session_v1(_sid)
                         latest_msg = self._last_devin_message(v1)
-                        if latest_msg:
+                        if latest_msg and latest_msg != _last_printed_msg:
+                            _last_printed_msg = latest_msg
                             snippet = latest_msg[:200].replace("\n", " ").strip()
                             if len(latest_msg) > 200:
                                 snippet += " ..."
