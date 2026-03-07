@@ -862,16 +862,16 @@ Record:
 _LAYER_JSON_EXAMPLES: dict[int, tuple[str, str]] = {
     1: (
         "layer_1_reconfirm",
-        '"layer_1_reconfirm": {{\n'
+        '"layer_1_reconfirm": {\n'
         '          "confirmed": true,\n'
         '          "method": "...",\n'
         '          "explanation": "...",\n'
         '          "additional_files": []\n'
-        '        }}',
+        '        }',
     ),
     2: (
         "layer_2_git_staleness",
-        '"layer_2_git_staleness": {{\n'
+        '"layer_2_git_staleness": {\n'
         '          "last_meaningful_edit_date": "YYYY-MM-DD",\n'
         '          "days_since_last_edit": 0,\n'
         '          "last_edit_commit_hash": "...",\n'
@@ -880,65 +880,65 @@ _LAYER_JSON_EXAMPLES: dict[int, tuple[str, str]] = {
         '          "first_introduced_date": "YYYY-MM-DD",\n'
         '          "bulk_commits_filtered": 0,\n'
         '          "is_stale": true\n'
-        '        }}',
+        '        }',
     ),
     3: (
         "layer_3_active_development",
-        '"layer_3_active_development": {{\n'
+        '"layer_3_active_development": {\n'
         '          "open_prs": [],\n'
         '          "recent_branches": [],\n'
         '          "actively_being_worked_on": false\n'
-        '        }}',
+        '        }',
     ),
     4: (
         "layer_4_static_reachability",
-        '"layer_4_static_reachability": {{\n'
+        '"layer_4_static_reachability": {\n'
         '          "is_reachable": false,\n'
         '          "call_chain": "",\n'
         '          "has_broken_dependencies": false,\n'
         '          "framework_exemption": false,\n'
         '          "framework_pattern": ""\n'
-        '        }}',
+        '        }',
     ),
     5: (
         "layer_5_issue_archaeology",
-        '"layer_5_issue_archaeology": {{\n'
+        '"layer_5_issue_archaeology": {\n'
         '          "related_issues": [],\n'
         '          "pr_comments_mentioning": [],\n'
         '          "commit_messages_mentioning": [],\n'
         '          "inline_annotations": [],\n'
         '          "code_owner": "",\n'
         '          "overall_sentiment": "no_discussion"\n'
-        '        }}',
+        '        }',
     ),
     6: (
         "layer_6_test_coverage",
-        '"layer_6_test_coverage": {{\n'
+        '"layer_6_test_coverage": {\n'
         '          "tests_reference_candidate": false,\n'
         '          "test_files": [],\n'
         '          "coverage_percentage": "unavailable",\n'
         '          "test_files_needing_update": []\n'
-        '        }}',
+        '        }',
     ),
     7: (
         "layer_7_runtime_signals",
-        '"layer_7_runtime_signals": {{\n'
+        '"layer_7_runtime_signals": {\n'
         '          "flag_platform_available": false,\n'
         '          "flag_evaluation_count": null,\n'
         '          "apm_available": false,\n'
         '          "apm_invocation_count": null,\n'
         '          "referenced_in_infra": false,\n'
         '          "unavailable_reason": "..."\n'
-        '        }}',
+        '        }',
     ),
     8: (
         "layer_8_external_consumers",
-        '"layer_8_external_consumers": {{\n'
+        '"layer_8_external_consumers": {\n'
         '          "is_exported": false,\n'
         '          "in_published_package": false,\n'
         '          "external_consumers_found": [],\n'
         '          "is_api_endpoint": false\n'
-        '        }}',
+        '        }',
     ),
 }
 
@@ -1000,13 +1000,13 @@ structure (do NOT wrap it in markdown commentary \u2014 the JSON block must be \
 the very last thing you write):
 
 ```json
-{{{{
+{{
   "candidates": [
-    {{{{
+    {{
       "candidate_id": "<id from the candidate list above>",
-      "layer_results": {{{{
+      "layer_results": {{
 {layer_results_block}
-      }}}},
+      }},
       "confidence": "HIGH | MEDIUM | LOW | EXEMPT",
       "summary": "2-3 sentence verdict",
       "blockers": ["...if LOW..."],
@@ -1014,10 +1014,10 @@ the very last thing you write):
       "suggested_pr_description": "...if HIGH or MEDIUM...",
       "exempt_reason": "...if EXEMPT...",
       "detection_improvement_suggestion": "...if EXEMPT..."
-    }}}}
+    }}
   ],
   "patterns_observed": ["any cross-candidate patterns you noticed"]
-}}}}
+}}
 ```
 
 Fill in real values for every field. Omit optional fields (blockers, \
@@ -1099,6 +1099,80 @@ def _extract_json_block(text: str) -> dict[str, Any] | None:
                         pass
                     break
     return None
+
+
+# Regex for natural-language verdict lines.  Matches patterns like:
+#   **candidate_id** ... **HIGH**
+#   - candidate_id: **MEDIUM** — some explanation
+#   candidate_id ... Verdict: **LOW**
+_NL_VERDICT_RE = re.compile(
+    r"""
+    \*{0,2}                        # optional bold markers
+    ([0-9a-f]{8,})                 # candidate id (hex, ≥8 chars)
+    \*{0,2}                        # optional bold markers
+    .*?                            # anything in between
+    (?:verdict[:\s]*)?             # optional "Verdict:" prefix
+    \*{0,2}                        # optional bold markers
+    (HIGH|MEDIUM|LOW|EXEMPT)       # confidence level
+    \*{0,2}                        # optional bold markers
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _parse_natural_language_verdicts(
+    text: str,
+    batch_candidates: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Best-effort extraction of per-candidate verdicts from Devin's
+    natural-language response when JSON output is unavailable.
+
+    Scans *text* for lines that mention a candidate ID alongside a
+    confidence keyword (HIGH / MEDIUM / LOW / EXEMPT).  Returns a dict
+    with a ``candidates`` key mirroring the JSON schema, or ``None`` if
+    no verdicts could be extracted.
+    """
+    candidate_ids = {c.get("id", "") for c in batch_candidates}
+    found: dict[str, dict[str, str]] = {}
+
+    for match in _NL_VERDICT_RE.finditer(text):
+        cid_fragment = match.group(1).lower()
+        confidence = match.group(2).upper()
+
+        # The regex captures hex fragments — match against known IDs.
+        for full_id in candidate_ids:
+            if full_id.startswith(cid_fragment) or cid_fragment in full_id:
+                if full_id not in found:
+                    # Grab surrounding text as a summary (up to 200 chars
+                    # from the match start).
+                    start = max(0, match.start() - 20)
+                    end = min(len(text), match.end() + 180)
+                    snippet = text[start:end].replace("\n", " ").strip()
+                    found[full_id] = {
+                        "confidence": confidence,
+                        "summary": snippet,
+                    }
+                break
+
+    if not found:
+        return None
+
+    candidates_list: list[dict[str, Any]] = []
+    for cid, info in found.items():
+        entry: dict[str, Any] = {
+            "candidate_id": cid,
+            "confidence": info["confidence"],
+            "summary": info["summary"],
+            "layer_results": {},
+        }
+        if info["confidence"] == CONFIDENCE_LOW:
+            entry["blockers"] = [
+                "Extracted from natural-language response; "
+                "see summary for details."
+            ]
+        candidates_list.append(entry)
+
+    return {"candidates": candidates_list, "patterns_observed": []}
 
 
 # ---------------------------------------------------------------------------
@@ -1481,6 +1555,12 @@ class LegacyCodeValidator:
 
             prompt = self._build_prompt(category_label, batch_candidates)
 
+            # Snapshot message count so we can find new messages later
+            pre_batch_v1 = self._client.get_session_v1(session_id)
+            pre_batch_msg_count = len(
+                (pre_batch_v1.get("messages") or [])
+            )
+
             # Send batch prompt as a follow-up message
             self._client.send_message(session_id, prompt)
 
@@ -1546,7 +1626,11 @@ class LegacyCodeValidator:
 
             # Fetch conversation via V1 to get Devin's latest text response
             v1_session = self._client.get_session_v1(session_id)
-            batch_result = self._parse_batch_response(v1_session)
+            batch_result = self._parse_batch_response(
+                v1_session,
+                batch_candidates,
+                msg_offset=pre_batch_msg_count,
+            )
 
             if batch_result is None:
                 print(
@@ -1628,30 +1712,82 @@ class LegacyCodeValidator:
                 return msg.get("message", "")
         return ""
 
+    @staticmethod
+    def _devin_messages_since(
+        session: dict[str, Any], offset: int
+    ) -> list[str]:
+        """Return the text of all ``devin_message`` entries added after
+        *offset* messages in the V1 session's ``messages`` list.
+
+        This lets us isolate only the messages that belong to the
+        current batch in a multi-batch single-session flow.
+        """
+        messages = (session.get("messages") or [])[offset:]
+        return [
+            msg.get("message", "")
+            for msg in messages
+            if msg.get("type") == "devin_message" and msg.get("message")
+        ]
+
     def _parse_batch_response(
-        self, session: dict[str, Any]
+        self,
+        session: dict[str, Any],
+        batch_candidates: list[dict[str, Any]],
+        *,
+        msg_offset: int = 0,
     ) -> dict[str, Any] | None:
         """Extract batch validation results from the session response.
 
         Uses the V1 session response which includes the full
         ``messages`` list.  Tries structured_output first, then
-        parses JSON from Devin's last message.
+        searches **all** Devin messages from the current batch for a
+        JSON code fence, and finally falls back to regex-based natural-
+        language parsing.
+
+        Args:
+            session: V1 session dict with ``messages`` list.
+            batch_candidates: The candidates sent in this batch (used
+                for the natural-language fallback).
+            msg_offset: Index into the ``messages`` list where this
+                batch's messages begin.
 
         Returns the parsed dict with a ``candidates`` key, or ``None``
         if nothing could be extracted.
         """
-        # Try structured output first
+        # 1. Try structured output first
         structured = session.get("structured_output")
         if structured is not None:
             if structured.get("candidates") is not None:
                 return structured
 
-        # Fallback: parse JSON from Devin's last message
+        # 2. Search ALL new Devin messages (newest first) for a JSON block
+        new_messages = self._devin_messages_since(session, msg_offset)
+        for text in reversed(new_messages):
+            parsed = _extract_json_block(text)
+            if parsed and "candidates" in parsed:
+                return parsed
+
+        # 3. Fallback: also check the last devin_message in the entire
+        #    session (in case msg_offset tracking missed something)
         last_text = self._last_devin_message(session)
         if last_text:
             parsed = _extract_json_block(last_text)
             if parsed and "candidates" in parsed:
                 return parsed
+
+        # 4. Final fallback: parse natural-language verdicts from the
+        #    batch's Devin messages.
+        combined_text = "\n".join(new_messages)
+        if combined_text:
+            nl_result = _parse_natural_language_verdicts(
+                combined_text, batch_candidates
+            )
+            if nl_result is not None:
+                print(
+                    "[validator]   (used natural-language fallback "
+                    "to extract verdicts)"
+                )
+                return nl_result
 
         return None
 
