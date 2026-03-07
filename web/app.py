@@ -53,7 +53,6 @@ PROJECT_ROOT = _PROJECT_ROOT
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
 # Import secrets loader from main.py so web GUI can check for loaded secrets
-sys.path.insert(0, PROJECT_ROOT)
 from main import _load_secrets, _SECRETS_MAP  # noqa: E402
 
 # Regex to parse default output filenames.
