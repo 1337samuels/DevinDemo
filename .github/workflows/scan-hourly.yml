@@ -1,9 +1,9 @@
-name: DevinDemo Pipeline Scan (Hourly Testing)
+name: DevinDemo Pipeline (Every 3 Hours)
 
 on:
   schedule:
-    # Every hour (for testing)
-    - cron: '0 * * * *'
+    # Every 3 hours
+    - cron: '0 */3 * * *'
 
   workflow_dispatch:
     inputs:
@@ -24,7 +24,7 @@ on:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -57,7 +57,7 @@ jobs:
         id: phases
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            PHASES="scan"
+            PHASES="scan,validate,cleanup,report"
           else
             PHASES="${{ inputs.phases }}"
           fi
