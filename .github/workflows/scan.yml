@@ -68,6 +68,9 @@ jobs:
           DEVIN_API_KEY_V3: ${{ secrets.DEVIN_API_KEY_V3 }}
           DEVIN_API_KEY_V1: ${{ secrets.DEVIN_API_KEY_V1 }}
           DEVIN_ORG_ID: ${{ secrets.DEVIN_ORG_ID }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           chmod +x scripts/run_pipeline.sh
           ./scripts/run_pipeline.sh \

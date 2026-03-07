@@ -258,11 +258,14 @@ demand.
 
 Go to **Settings > Secrets and variables > Actions > Secrets** and add:
 
-| Secret              | Description                                    |
-|---------------------|------------------------------------------------|
-| `DEVIN_API_KEY_V3`  | Devin service user API key (`cog_*`)           |
-| `DEVIN_API_KEY_V1`  | Devin v1 API key (`apk_*`)                     |
-| `DEVIN_ORG_ID`      | Devin organization ID (`org-*`)                |
+| Secret                 | Description                                    | Required for     |
+|------------------------|------------------------------------------------|------------------|
+| `DEVIN_API_KEY_V3`     | Devin service user API key (`cog_*`)           | Phases 1-3       |
+| `DEVIN_API_KEY_V1`     | Devin v1 API key (`apk_*`)                     | Phases 1-3       |
+| `DEVIN_ORG_ID`         | Devin organization ID (`org-*`)                | Phases 1-3       |
+| `NOTION_API_KEY`       | Notion integration API token                   | Phase 4 (report) |
+| `NOTION_PARENT_PAGE_ID`| Notion page ID for creating databases          | Phase 4 (report) |
+| `SLACK_WEBHOOK_URL`    | Slack incoming webhook URL for notifications   | Phase 4 (report) |
 
 For scheduled runs, also set a **repository variable** (Settings > Secrets and
 variables > Actions > Variables):
@@ -308,7 +311,8 @@ You can also run the pipeline locally using the helper script:
 ```
 
 Required environment variables: `DEVIN_API_KEY_V3`, `DEVIN_API_KEY_V1`,
-`DEVIN_ORG_ID`.
+`DEVIN_ORG_ID`. For the report phase, also set `NOTION_API_KEY`,
+`NOTION_PARENT_PAGE_ID`, and `SLACK_WEBHOOK_URL`.
 
 ## Project structure
 
