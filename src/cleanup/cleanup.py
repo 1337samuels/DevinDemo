@@ -215,6 +215,7 @@ class CleanupProgressTracker:
         self._session_id = session_id
         self._start = time.monotonic()
         self._poll_count = 0
+        self._last_printed_msg = ""
 
     @staticmethod
     def _fmt_elapsed(seconds: float) -> str:
@@ -248,7 +249,8 @@ class CleanupProgressTracker:
             try:
                 v1 = self._client.get_session_v1(self._session_id)
                 latest_msg = self._last_devin_message(v1)
-                if latest_msg:
+                if latest_msg and latest_msg != self._last_printed_msg:
+                    self._last_printed_msg = latest_msg
                     snippet = latest_msg[:200].replace("\n", " ").strip()
                     if len(latest_msg) > 200:
                         snippet += " ..."

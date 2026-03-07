@@ -563,6 +563,7 @@ class FeatureFlagScanner:
             # [SCANNED] markers for real per-file progress.
             batch_start = time.monotonic()
             _poll_count = 0
+            _last_printed_msg = ""
 
             def _batch_status(
                 sess: dict[str, Any],
@@ -574,7 +575,7 @@ class FeatureFlagScanner:
                 _bfiles: list[str] = batch_files,
                 _sid: str = session_id,
             ) -> None:
-                nonlocal _poll_count
+                nonlocal _poll_count, _last_printed_msg
                 _poll_count += 1
                 elapsed = time.monotonic() - _bstart
                 status = sess.get("status", "")
@@ -607,8 +608,10 @@ class FeatureFlagScanner:
                     f"  | Files: {cur_files}/{_ftot} ({pct}%)"
                 )
 
-                # Print latest Devin message snippet every 2nd poll
-                if latest_msg:
+                # Print latest Devin message snippet every 2nd poll,
+                # but only if it differs from the last one we printed.
+                if latest_msg and latest_msg != _last_printed_msg:
+                    _last_printed_msg = latest_msg
                     # Truncate to first 200 chars for readability
                     snippet = latest_msg[:200].replace("\n", " ").strip()
                     if len(latest_msg) > 200:
