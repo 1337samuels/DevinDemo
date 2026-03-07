@@ -14,7 +14,7 @@ on:
       phases:
         description: 'Comma-separated phases to run: scan,validate,cleanup,report'
         required: false
-        default: 'scan'
+        default: 'scan,validate,cleanup,report'
         type: string
       scan_input:
         description: 'Path to existing scan results (for validate/cleanup/report phases)'
