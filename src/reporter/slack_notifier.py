@@ -11,6 +11,7 @@ designated channel.  The message includes:
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any
@@ -227,8 +228,6 @@ class SlackNotifier:
             print("[slack] Bot token or channel ID not configured; skipping file uploads.")
             return
 
-        import os
-
         for fpath in file_paths:
             if not os.path.isfile(fpath):
                 print(f"[slack] File not found, skipping: {fpath}")
@@ -293,8 +292,7 @@ class SlackNotifier:
             )
             try:
                 with urllib.request.urlopen(req) as resp:
-                    import json as _json
-                    result = _json.loads(resp.read().decode())
+                    result = json.loads(resp.read().decode())
                     if not result.get("ok"):
                         err = result.get("error", "unknown")
                         raise SlackNotifyError(200, f"files.upload failed: {err}")
