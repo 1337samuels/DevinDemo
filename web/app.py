@@ -36,6 +36,19 @@ _phase_lock = threading.Lock()
 _current_process: subprocess.Popen | None = None
 _process_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Output buffering & state for surviving page refreshes
+# ---------------------------------------------------------------------------
+# Per-phase console output buffers (individual phase runs)
+_phase_buffers: dict[str, list[str]] = {p: [] for p in _VALID_PHASES}
+_phase_running: dict[str, bool] = {p: False for p in _VALID_PHASES}
+
+# "Run All" console output buffer and state
+_runall_buffer: list[dict] = []          # list of {"event": str, "payload": dict}
+_runall_active: bool = False
+_runall_phase_index: int = -1            # current phase index (0-3)
+_runall_lock = threading.Lock()
+
 PROJECT_ROOT = _PROJECT_ROOT
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 
@@ -495,16 +508,26 @@ def _mask_cmd(cmd: list[str]) -> str:
 
 
 def _stream_process(cmd: list[str], phase: str, sid: str) -> None:
-    """Run a subprocess and stream its stdout/stderr to the client via SocketIO.
+    """Run a subprocess and stream its stdout/stderr to **all** clients.
 
     Each phase emits to its own ``console_output_<phase>`` and
     ``process_done_<phase>`` events so the frontend can display them in
     separate console panels.
+
+    Output is also buffered in ``_phase_buffers`` so that clients who
+    connect (or reconnect) mid-run can replay the output.
     """
     out_event = f"console_output_{phase}"
     done_event = f"process_done_{phase}"
 
-    socketio.emit(out_event, {"data": f"$ {_mask_cmd(cmd)}\n"}, to=sid)
+    def _emit_and_buffer(event: str, payload: dict) -> None:
+        _phase_buffers[phase].append(json.dumps({"event": event, "payload": payload}))
+        socketio.emit(event, payload)
+
+    _phase_buffers[phase] = []  # reset buffer for new run
+    _phase_running[phase] = True
+
+    _emit_and_buffer(out_event, {"data": f"$ {_mask_cmd(cmd)}\n"})
 
     try:
         proc = subprocess.Popen(
@@ -521,35 +544,33 @@ def _stream_process(cmd: list[str], phase: str, sid: str) -> None:
             _phase_processes[phase] = proc
 
         for line in proc.stdout:
-            socketio.emit(out_event, {"data": line}, to=sid)
+            _emit_and_buffer(out_event, {"data": line})
 
         proc.wait()
         exit_code = proc.returncode
 
         if exit_code == 0:
-            socketio.emit(
+            _emit_and_buffer(
                 done_event,
                 {
                     "data": "\nProcess finished successfully (exit code 0)\n",
                     "success": True,
                 },
-                to=sid,
             )
         else:
-            socketio.emit(
+            _emit_and_buffer(
                 done_event,
                 {"data": f"\nProcess exited with code {exit_code}\n", "success": False},
-                to=sid,
             )
     except Exception as exc:
-        socketio.emit(
+        _emit_and_buffer(
             done_event,
             {"data": f"\nError: {exc}\n", "success": False},
-            to=sid,
         )
     finally:
         with _phase_lock:
             _phase_processes[phase] = None
+        _phase_running[phase] = False
 
 
 @socketio.on("run_phase")
@@ -708,11 +729,13 @@ def _find_latest_result(prefix: str) -> str | None:
 
 
 def _run_phase_subprocess(cmd: list[str], sid: str, phase: str | None = None) -> int:
-    """Run a subprocess, stream output to *sid*, and return the exit code.
+    """Run a subprocess, stream output to **all** clients, and return the exit code.
 
     Unlike ``_stream_process`` this does **not** emit ``process_done`` and
     does **not** update ``_current_process`` — the caller (``_run_all_pipeline``)
     manages the process reference and decides whether to continue.
+
+    Output is appended to ``_runall_buffer`` for replay on reconnect.
 
     When *phase* is provided the ``console_output`` payload includes a
     ``phase`` key so the frontend can route the output to the correct
@@ -724,7 +747,9 @@ def _run_phase_subprocess(cmd: list[str], sid: str, phase: str | None = None) ->
         payload: dict = {"data": text}
         if phase:
             payload["phase"] = phase
-        socketio.emit("console_output", payload, to=sid)
+        with _runall_lock:
+            _runall_buffer.append({"event": "console_output", "payload": payload})
+        socketio.emit("console_output", payload)
 
     _emit_console(f"$ {_mask_cmd(cmd)}\n")
 
@@ -759,13 +784,33 @@ def _run_phase_subprocess(cmd: list[str], sid: str, phase: str | None = None) ->
 _PHASE_NAMES = ["Phase 1: Scan", "Phase 2: Validate", "Phase 3: Cleanup", "Phase 4: Report"]
 
 
+def _runall_emit(event: str, payload: dict) -> None:
+    """Emit a SocketIO event to all clients AND buffer it for replay."""
+    global _runall_phase_index
+    with _runall_lock:
+        _runall_buffer.append({"event": event, "payload": payload})
+        if event == "run_all_phase":
+            _runall_phase_index = payload.get("phase_index", -1)
+    socketio.emit(event, payload)
+
+
 def _run_all_pipeline(args: dict, sid: str) -> None:
     """Run all four phases sequentially, chaining outputs.
 
     Stops immediately if any phase exits with a non-zero code.
     _current_process is kept set for the entire pipeline duration to prevent
     concurrent runs; it is only cleared in the ``finally`` block.
+
+    All output is broadcast to every connected client and buffered in
+    ``_runall_buffer`` so that clients who refresh mid-run can replay it.
     """
+    global _runall_active, _runall_phase_index
+
+    with _runall_lock:
+        _runall_buffer.clear()
+        _runall_active = True
+        _runall_phase_index = -1
+
     repo = args.get("repo", "")
     api_key = args.get("api_key") or None
     v1_api_key = args.get("v1_api_key") or None
@@ -780,11 +825,11 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
     def _header(phase_idx: int) -> None:
         name = _PHASE_NAMES[phase_idx]
         pid = phase_ids[phase_idx]
-        socketio.emit("console_output", {
+        _runall_emit("console_output", {
             "data": f"\n{'=' * 60}\n  {name}\n{'=' * 60}\n\n",
             "phase": pid,
-        }, to=sid)
-        socketio.emit("run_all_phase", {"phase_index": phase_idx}, to=sid)
+        })
+        _runall_emit("run_all_phase", {"phase_index": phase_idx})
 
     try:
         # ---- Phase 1: Scan ----
@@ -800,18 +845,18 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
 
         rc = _run_phase_subprocess(cmd_scan, sid, phase="scan")
         if rc != 0:
-            socketio.emit("process_done", {
+            _runall_emit("process_done", {
                 "data": f"\nPipeline stopped: Phase 1 (Scan) failed with exit code {rc}\n",
                 "success": False,
-            }, to=sid)
+            })
             return
 
         scan_output = _find_latest_result("scan")
         if not scan_output:
-            socketio.emit("process_done", {
+            _runall_emit("process_done", {
                 "data": "\nPipeline stopped: no scan output file found.\n",
                 "success": False,
-            }, to=sid)
+            })
             return
 
         # ---- Phase 2: Validate ----
@@ -827,18 +872,18 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
 
         rc = _run_phase_subprocess(cmd_validate, sid, phase="validate")
         if rc != 0:
-            socketio.emit("process_done", {
+            _runall_emit("process_done", {
                 "data": f"\nPipeline stopped: Phase 2 (Validate) failed with exit code {rc}\n",
                 "success": False,
-            }, to=sid)
+            })
             return
 
         validate_output = _find_latest_result("validate")
         if not validate_output:
-            socketio.emit("process_done", {
+            _runall_emit("process_done", {
                 "data": "\nPipeline stopped: no validate output file found.\n",
                 "success": False,
-            }, to=sid)
+            })
             return
 
         # ---- Phase 3: Cleanup ----
@@ -854,10 +899,10 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
 
         rc = _run_phase_subprocess(cmd_cleanup, sid, phase="cleanup")
         if rc != 0:
-            socketio.emit("process_done", {
+            _runall_emit("process_done", {
                 "data": f"\nPipeline stopped: Phase 3 (Cleanup) failed with exit code {rc}\n",
                 "success": False,
-            }, to=sid)
+            })
             return
 
         cleanup_output = _find_latest_result("cleanup")
@@ -878,21 +923,23 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
 
         rc = _run_phase_subprocess(cmd_report, sid, phase="report")
         if rc != 0:
-            socketio.emit("process_done", {
+            _runall_emit("process_done", {
                 "data": f"\nPipeline stopped: Phase 4 (Report) failed with exit code {rc}\n",
                 "success": False,
-            }, to=sid)
+            })
             return
 
-        socketio.emit("process_done", {
+        _runall_emit("process_done", {
             "data": "\n" + "=" * 60 + "\n  All 4 phases completed successfully!\n" + "=" * 60 + "\n",
             "success": True,
-        }, to=sid)
+        })
     finally:
         # Always clear _current_process when the pipeline exits (success,
         # failure, or exception) so subsequent runs are not blocked.
         with _process_lock:
             _current_process = None
+        with _runall_lock:
+            _runall_active = False
 
 
 @socketio.on("run_all")
@@ -947,12 +994,58 @@ def handle_stop_all(data=None):
         if _current_process is not None and _current_process.poll() is None:
             _current_process.terminate()
             _current_process = None
-            emit("process_done", {
+            _runall_emit("process_done", {
                 "data": "\nPipeline terminated by user.\n",
                 "success": False,
             })
         else:
             emit("console_output", {"data": "No pipeline is currently running.\n"})
+
+
+# ---------------------------------------------------------------------------
+# Reconnect support: replay buffered output to newly connected clients
+# ---------------------------------------------------------------------------
+
+@socketio.on("request_state")
+def handle_request_state(data=None):
+    """Replay buffered output to the requesting client on (re)connect.
+
+    The frontend calls this immediately after socket connect so the user
+    sees the full console history and correct UI state.
+    """
+    from flask import request as flask_request
+    caller_sid = flask_request.sid
+
+    # --- Run-all pipeline state ---
+    with _runall_lock:
+        ra_active = _runall_active
+        ra_phase_index = _runall_phase_index
+        ra_buf = list(_runall_buffer)  # snapshot
+
+    if ra_active or ra_buf:
+        # Send state_restore FIRST so the frontend sets runAllActive=true
+        # and is ready to accept the replayed console_output events.
+        socketio.emit("state_restore", {
+            "runall_active": ra_active,
+            "runall_phase_index": ra_phase_index,
+            "has_buffer": bool(ra_buf),
+        }, to=caller_sid)
+        # Replay buffered events (console_output, run_all_phase, process_done)
+        for entry in ra_buf:
+            socketio.emit(entry["event"], entry["payload"], to=caller_sid)
+
+    # --- Per-phase state ---
+    for phase in _VALID_PHASES:
+        buf = _phase_buffers.get(phase, [])
+        running = _phase_running.get(phase, False)
+        if buf or running:
+            for raw in buf:
+                entry = json.loads(raw)
+                socketio.emit(entry["event"], entry["payload"], to=caller_sid)
+            socketio.emit("phase_state_restore", {
+                "phase": phase,
+                "running": running,
+            }, to=caller_sid)
 
 
 if __name__ == "__main__":

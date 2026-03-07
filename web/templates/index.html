@@ -1330,6 +1330,60 @@
         // Per-phase running state
         const phaseRunning = { scan: false, validate: false, cleanup: false, report: false };
 
+        // ----- Reconnect: request buffered state from server -----
+        socket.on('connect', () => {
+            socket.emit('request_state');
+        });
+
+        // Restore "Run All" UI state after reconnect / refresh.
+        // state_restore arrives BEFORE the replayed buffer events.
+        // We set runAllActive = true so the replayed console_output and
+        // process_done events are accepted by their handlers.  If the
+        // pipeline already finished, the replayed process_done will reset
+        // runAllActive back to false and restore button states correctly.
+        socket.on('state_restore', (msg) => {
+            if (msg.runall_active || msg.has_buffer) {
+                // Accept upcoming replayed events
+                runAllActive = true;
+
+                // Show pipeline progress bar
+                const progress = document.getElementById('pipeline-progress');
+                if (progress) progress.style.display = 'flex';
+
+                if (msg.runall_active) {
+                    // Pipeline is still running — show Stop, disable Run
+                    const btnRun = document.getElementById('btn-run-all');
+                    const btnStop = document.getElementById('btn-stop-all');
+                    if (btnRun) btnRun.disabled = true;
+                    if (btnStop) btnStop.style.display = 'inline-block';
+                }
+
+                // Restore phase progress indicators
+                if (msg.runall_phase_index >= 0) {
+                    for (let i = 0; i < msg.runall_phase_index; i++) {
+                        const step = document.getElementById('pipeline-step-' + i);
+                        if (step) step.className = 'pipeline-step done';
+                    }
+                    const cur = document.getElementById('pipeline-step-' + msg.runall_phase_index);
+                    if (cur) cur.className = 'pipeline-step active';
+                }
+            }
+        });
+
+        // Restore per-phase UI state after reconnect / refresh
+        socket.on('phase_state_restore', (msg) => {
+            const phase = msg.phase;
+            if (msg.running) {
+                phaseRunning[phase] = true;
+                const btnRun = document.getElementById('btn-run-' + phase);
+                const btnStop = document.getElementById('btn-stop-' + phase);
+                const statusDot = document.getElementById('status-dot-' + phase);
+                if (btnRun) btnRun.disabled = true;
+                if (btnStop) btnStop.style.display = 'inline-block';
+                if (statusDot) statusDot.className = 'status-dot running';
+            }
+        });
+
         // ----- Validation layer checkboxes -----
 
         let allLayersSelected = true;
