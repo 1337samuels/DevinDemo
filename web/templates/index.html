@@ -1588,6 +1588,8 @@
                 document.getElementById('btn-stop-' + phase).style.display = 'none';
                 // Refresh dropdowns after process finishes (new result files may exist)
                 loadAllDropdowns();
+                // Refresh ACU summary after a phase completes
+                loadACUSummary();
             });
         }
 
@@ -1625,6 +1627,8 @@
                     }
                 }
                 loadAllDropdowns();
+                // Refresh ACU summary after run_all completes
+                loadACUSummary();
             }
         });
 
