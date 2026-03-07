@@ -54,23 +54,28 @@ This lets me track your progress in real time.
 
 For each file, identify **all** of the following:
 
-## 1. Feature Flags
+## 1. Feature Flags (including potentially stale ones)
 Look for general feature-flag patterns — this project does NOT use a specific flag management system (e.g. LaunchDarkly).  Instead, look for:
 - Environment variable checks that gate behaviour   (``os.environ.get("FEATURE_...")``, ``os.getenv(...)``).
 - Boolean configuration variables used in ``if`` / ``else`` branches   (e.g. ``ENABLE_NEW_UI = True``).
 - Functions whose sole purpose is to check whether a feature is enabled   (e.g. ``def is_feature_enabled(name): ...``).
 - Constants or settings that act as on/off switches.
 
+**Staleness signals (flag these with extra priority):**
+- Flags hardcoded to a constant value (e.g. ``ENABLE_X = True``) with no   dynamic override (no ``os.getenv`` fallback, no config file reference).
+- ``if``/``else`` branches where the condition is always the same value   — the other branch is effectively dead.
+- Flags whose names reference old versions, dates, or completed projects   (e.g. ``ENABLE_V2_MIGRATION``, ``USE_NEW_AUTH_2023``).
+
 ## 2. Dead Code
 - Unreachable branches (e.g. ``if False:``, ``if 0:``, always-true guards).
-- Unused functions or classes (defined but never called/imported elsewhere).
-- Unused imports.
-- Large blocks of commented-out code (>=3 consecutive commented lines that   look like former source code, NOT documentation comments).
+- Functions/classes with **strong unused signals**: prefixed with ``_``   (private) and only defined but never referenced in the same file, OR   defined in a module that is never imported by any other file in the   batch. Do NOT flag functions that could be entry points, framework   handlers, CLI commands, or test fixtures — Phase 2 will do full   reachability analysis.
+- Large blocks of commented-out code (>=3 consecutive commented lines that   look like former source code, NOT documentation comments). These are   candidates for removal — Phase 2 will verify they are truly dead code   and not intentionally preserved.
+- **Deprioritize unused imports** — only flag them if the import is from   a module that no longer exists in the project or from a deprecated   package. Routine unused imports are better handled by linters.
 
-## 3. Tech Debt
-- ``TODO``, ``FIXME``, ``HACK``, ``XXX`` comments.
-- Use of deprecated stdlib or third-party APIs.
-- Compatibility shims for old Python versions (e.g. ``sys.version`` checks,   ``six`` library usage).
+## 3. Tech Debt (prioritize actionable items)
+- ``TODO``, ``FIXME``, ``HACK``, ``XXX`` comments — but **prioritize   ones with staleness signals**: they reference a ticket/issue number,   mention a version or date that has passed, or say things like "remove   after", "temporary", "workaround for". Skip generic ``# TODO`` with   no actionable context.
+- Use of deprecated stdlib or third-party APIs (e.g. ``optparse`` instead   of ``argparse``, ``imp`` instead of ``importlib``, APIs with   ``DeprecationWarning``).
+- Compatibility shims for old Python versions (e.g. ``sys.version`` checks,   ``six`` library usage, ``try: import X except: import Y`` patterns for   stdlib modules that have been merged).
 
 ## Output format
 After printing ``[SCANNED]`` for every file above, respond with **only** a

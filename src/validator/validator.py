@@ -534,34 +534,70 @@ _LAYER_PROMPTS: dict[int, str] = {
 
 ---
 
-### Layer 1: Re-Confirm the Detection
+### Layer 1: Re-Confirm the Detection (Category-Aware)
 
-The initial identification may have matched a comment, string literal, test \
-fixture, or documentation rather than actual live code.
+The initial identification may have been incorrect. Your job is to verify \
+the detection is valid **for its category**. Different categories require \
+different confirmation logic:
 
-Do this:
-- Open each file where this candidate was flagged. Read the surrounding 20 \
-  lines of context.
-- Determine: is this a real code reference, or is the match inside a \
-  comment, string, doc file, test mock, or config definition?
-- If the original detection was regex-based, try to verify with stronger \
-  analysis. For example, check if the match is actually a function call vs. \
-  just a variable name that happens to contain the pattern.
-- For feature flags specifically: identify the flag SDK being used (e.g., \
-  LaunchDarkly `variation()`, custom `isFeatureEnabled()`). Confirm the \
-  match is an actual evaluation call.
-- Search the entire codebase for other references to this symbol that \
-  weren't in the original detection. If you find more, note them.
+**For feature_flag candidates:**
+- Open the file and read 20 lines of context around the flagged line.
+- Confirm this is an actual feature flag pattern (env var check, boolean \
+  config, gate function) — not just a variable name that happens to \
+  match the pattern, or a string/comment mentioning it.
+- Identify how the flag is controlled (env var, config file, hardcoded). \
+  If hardcoded to a constant with no dynamic override, note this as a \
+  staleness signal.
+- Search the codebase for other references to this flag name.
+
+**For dead_code candidates (sub-category: commented_out_code):**
+- Open the file and read the commented block plus 10 lines above/below.
+- Confirm the commented lines are **former source code** (function defs, \
+  class defs, control flow, assignments) — NOT documentation, ASCII art, \
+  license headers, example usage in docstrings, or configuration templates.
+- Do NOT mark commented-out code as EXEMPT just because "it's a comment." \
+  The whole point of this detection category is to find commented-out \
+  source code that should be deleted. Only EXEMPT if the commented lines \
+  are documentation/examples, not former code.
+
+**For dead_code candidates (other sub-categories: unused_function, \
+unused_import, unreachable_branch, etc.):**
+- Open the file and read 20 lines of context.
+- Confirm the code actually exists at the flagged location (the file may \
+  have changed since Phase 1 ran).
+- For unused functions: do a quick grep to see if the function is called \
+  anywhere. If it's clearly called, mark EXEMPT.
+- For unreachable branches: verify the condition is truly always \
+  true/false.
+
+**For tech_debt candidates:**
+- Open the file and read the flagged line plus context.
+- For TODO/FIXME/HACK comments: confirm the comment still exists AND is \
+  actionable. A TODO that says "TODO: remove after v2.0 migration" is \
+  valid if v2.0 is long past. A TODO that says "TODO: optimize later" \
+  with no timeline is lower priority but still valid — do NOT EXEMPT it.
+- For deprecated API usage: confirm the API is actually deprecated and \
+  that a modern replacement exists.
+- For compatibility shims: confirm the shim targets a Python version \
+  older than the project's minimum supported version.
 
 Record:
 - confirmed: true/false
 - method used to verify
-- if false, explain why (matched a comment, string, etc.)
+- if false, explain why (documentation comment, code doesn't exist, etc.)
 - any additional files found that also reference this candidate
 
-**If you cannot confirm the detection is real code, STOP HERE. Mark this \
-candidate as EXEMPT (false positive) and skip the remaining layers. \
-Explain why.**
+**EXEMPT rules (mark EXEMPT and skip remaining layers ONLY if):**
+- The flagged code does not exist at the reported location (file changed).
+- For feature_flag: the match is inside a string, comment, or docs — not \
+  an actual flag evaluation.
+- For dead_code (commented_out_code): the lines are documentation, \
+  examples, or license headers — not former source code.
+- For dead_code (unused_function/class): the function IS clearly used \
+  (found call sites).
+- For tech_debt: the TODO/marker no longer exists in the file.
+- Do NOT EXEMPT a candidate just because it "might" still be useful. \
+  That's what the remaining layers will determine.
 """,
     2: """\
 
