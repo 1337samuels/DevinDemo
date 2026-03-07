@@ -7,3 +7,6 @@ secrets.txt
 dist/
 build/
 results/
+.ruff_cache/
+.pytest_cache/
+.coverage

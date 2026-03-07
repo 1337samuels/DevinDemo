@@ -1,11 +1,8 @@
 # DevinDemo — Feature Flag & Tech Debt Scanner
 
 A Devin-powered automation that scans Python codebases for stale feature flags,
-dead code, and tech debt — then automates cleanup via PRs and reports findings.
-
-> *"We've got feature flags from three years ago still in the codebase. Dead code
-> everywhere. New engineers spend their first two weeks just figuring out what's
-> real and what's abandoned."*
+dead code, and tech debt — then validates findings, generates cleanup PRs, and
+reports results to Notion / Slack.
 
 ## How it works
 
@@ -13,29 +10,30 @@ The tool uses the [Devin v3 API](https://docs.devin.ai/api-reference/v3/usage-ex
 to create AI-powered sessions that analyse a target repository.  The pipeline
 has four stages:
 
-| Stage | Status | Description |
-|-------|--------|-------------|
-| **1. Identify** | Implemented | Fast scan — flag potential feature flags (with staleness signals), dead code (strong unused signals only), actionable tech debt |
-| **2. Validate** | Stub | Deep-dive verification of each finding from Part 1 (slow, thorough) |
-| **3. Cleanup**  | Stub | Generate PRs that remove dead code and simplify branches |
-| **4. Report**   | Stub | Publish summaries to Notion, Slack, or GitHub Issues |
+| Stage | Description |
+|-------|-------------|
+| **1. Scan** | Fast identification — flag potential feature flags (with staleness signals), dead code, actionable tech debt |
+| **2. Validate** | Deep 8-layer verification of each finding (slow, thorough) |
+| **3. Cleanup PR's** | Generate PRs that remove dead code and simplify branches |
+| **4. Report** | Publish summaries to Notion, Slack, or GitHub Issues |
 
 ## Prerequisites
 
 - **Python 3.10+**
-- **pip** dependencies: `pip install -r requirements.txt`
+- **Runtime dependencies:** `pip install -r requirements.txt`
+- **Test dependencies:** `pip install -r requirements-dev.txt`
 - A Devin **service user** API key (starts with `cog_`) — create one in **Settings > Service users**
+- A Devin **legacy API key** (starts with `apk_`) — create one in **Settings > API keys**
 - Your Devin **organization ID** (starts with `org-`) — find it in **Settings > General**
 
 ### Authentication
 
-| Script / Tool       | Key type                                  | Where to create                           |
-|---------------------|-------------------------------------------|-------------------------------------------|
-| `main.py` (scanner) | Service user key (`cog_*`)               | **Settings > Service users**              |
-| `list_sessions.py`  | Service user key (`cog_*`)               | **Settings > Service users**              |
-| `send_message.py`   | Personal key (`apk_user_*`) or Service key (`apk_*`) | **Settings > API keys** |
+| Key type | Prefix | Where to create | Used for |
+|----------|--------|-----------------|----------|
+| Service user key | `cog_*` | **Settings > Service users** | v3 API (session creation, polling) |
+| Legacy API key | `apk_*` | **Settings > API keys** | v1 API (`send_message`, session details) |
 
-> **Note:** `cog_*` keys do **not** work with the v1 API, and `apk_*` / `apk_user_*` keys do **not** work with the v3 API.
+> **Note:** `cog_*` keys do **not** work with the v1 API, and `apk_*` keys do **not** work with the v3 API.
 > See the [authentication docs](https://docs.devin.ai/api-reference/authentication) for details.
 
 ### `secrets.txt` (recommended)
@@ -44,12 +42,13 @@ Instead of passing API keys on every command, create a `secrets.txt` file in the
 project root.  The CLI will automatically load it and fill in any missing flags.
 
 ```text
+API_V3_KEY = "cog_..."
+API_V1_KEY = "apk_..."
+ORG_ID = "org-..."
+
 NOTION_SECRET = "ntn_..."
 NOTION_MASTER_PAGE_ID = "31b37812..."
-
-API_V3_KEY = "cog_..."
-ORG_ID = "org-..."
-API_V1_KEY = "apk_..."
+SLACK_WEBHOOK_URL = "https://hooks.slack.com/..."
 ```
 
 | Key                    | Maps to CLI flag           | Phases |
@@ -59,6 +58,7 @@ API_V1_KEY = "apk_..."
 | `ORG_ID`               | `--org-id`                 | 1-3    |
 | `NOTION_SECRET`        | `--notion-api-key`         | 4      |
 | `NOTION_MASTER_PAGE_ID`| `--notion-parent-page-id`  | 4      |
+| `SLACK_WEBHOOK_URL`    | `--slack-webhook-url`      | 4      |
 
 > **Important:** `secrets.txt` is listed in `.gitignore` and must **never** be
 > committed.  CLI flags always take precedence over `secrets.txt` values.
@@ -69,126 +69,114 @@ API_V1_KEY = "apk_..."
 # Install dependencies
 pip install -r requirements.txt
 
-# Run a scan
-python main.py --api-key <YOUR_COG_KEY> --org-id <YOUR_ORG_ID> scan owner/repo
+# Run a scan (with secrets.txt configured)
+python main.py scan owner/repo
+
+# Or pass credentials explicitly
+python main.py --api-key <COG_KEY> --v1-api-key <APK_KEY> --org-id <ORG_ID> scan owner/repo
 ```
 
 ## Usage
 
-### main.py (scanner)
-
 ```bash
-python main.py --api-key <KEY> --org-id <ORG_ID> <command> [options]
+python main.py <command> [options]
 ```
 
-### Global arguments
+### Global arguments (phases 1-3)
 
-| Argument     | Description |
-|--------------|-------------|
-| `--api-key`  | Devin service user API key (starts with `cog_`) |
-| `--org-id`   | Devin organization ID (starts with `org-`) |
+| Argument       | Description |
+|----------------|-------------|
+| `--api-key`    | Devin service user API key (`cog_*`) |
+| `--v1-api-key` | Devin legacy API key (`apk_*`) |
+| `--org-id`     | Devin organization ID (`org-*`) |
 
 ### Commands
 
-#### `scan` — Identify feature flags & tech debt (Part 1)
+#### `scan` — Identify feature flags & tech debt (Phase 1)
 
 ```bash
-python main.py --api-key <KEY> --org-id <ORG_ID> scan owner/repo [options]
+python main.py scan owner/repo [options]
 ```
 
 | Option            | Description                                  | Default |
 |-------------------|----------------------------------------------|---------|
 | `repo`            | GitHub repository in `owner/repo` format     | —       |
-| `-o`, `--output`  | Write full JSON results to a file            | —       |
-| `--poll-interval`  | Seconds between status polls                | 15      |
-| `--poll-timeout`   | Max seconds to wait for session completion  | 900     |
-| `--max-acu`        | Optional ACU cap for the Devin session      | —       |
+| `-o`, `--output`  | Write full JSON results to a file            | auto    |
+| `--batch-size`    | Max files per batch scan session             | 10      |
+| `--poll-interval` | Seconds between status polls                 | 15      |
+| `--poll-timeout`  | Max seconds to wait for session completion   | 900     |
+| `--max-acu`       | Optional ACU cap for the Devin session       | —       |
 
-#### `validate` — Validate findings (Part 2) — *not yet implemented*
-
-#### `cleanup` — Generate cleanup PRs (Part 3) — *not yet implemented*
-
-#### `report` — Publish tech-debt report (Part 4) — *not yet implemented*
-
-#### Examples
-
-Scan a repository and print results to stdout:
+#### `validate` — Deep verification of findings (Phase 2)
 
 ```bash
-python main.py --api-key cog_xxx --org-id org-xxx scan myorg/myrepo
+python main.py validate <scan_results.json> [options]
 ```
 
-Scan and save full JSON results to a file:
+| Option              | Description                                    | Default |
+|---------------------|------------------------------------------------|---------|
+| `input`             | Path to the Phase 1 scan results JSON          | —       |
+| `-o`, `--output`    | Write validated results to a file              | auto    |
+| `--layers`          | Comma-separated validation layer numbers       | all     |
+| `--max-batch-size`  | Max candidates per Devin session               | 5       |
+| `--staleness-days`  | Staleness threshold in days                    | 365     |
+| `--pr-lookback-days`| PR lookback period in days                     | 90      |
+| `--issue-lookback-days` | Issue lookback period in days              | 180     |
+| `--poll-interval`   | Seconds between status polls                   | 15      |
+| `--poll-timeout`    | Max seconds to wait per session                | 900     |
+| `--max-acu`         | Optional ACU cap per Devin session             | —       |
+
+#### `cleanup` — Generate cleanup PRs (Phase 3)
 
 ```bash
-python main.py --api-key cog_xxx --org-id org-xxx scan myorg/myrepo -o results.json
+python main.py cleanup <validated_results.json> [options]
 ```
 
-The output JSON from Part 1 is the input for Part 2.  Each finding has a unique
-`id` and a `verification_status` field (initially `"unverified"`) that Part 2
-will update to `"verified"`, `"false_positive"`, or `"needs_review"`.
+| Option            | Description                                  | Default |
+|-------------------|----------------------------------------------|---------|
+| `input`           | Path to the Phase 2 validated findings JSON  | —       |
+| `-o`, `--output`  | Write cleanup results to a file              | auto    |
+| `--auto-merge`    | Auto-merge PRs that passed all layers        | off     |
+| `--poll-interval` | Seconds between status polls                 | 15      |
+| `--poll-timeout`  | Max seconds to wait per finding              | 900     |
+| `--max-acu`       | Optional ACU cap for the Devin session       | —       |
 
-### send_message.py
-
-A v1 API workaround for **Teams accounts** that cannot use the v3 `send_message` endpoint.
+#### `report` — Publish findings (Phase 4)
 
 ```bash
-python send_message.py <YOUR_DEVIN_API_KEY> <SESSION_ID> "<MESSAGE>"
+python main.py report --input <validated_results.json> [options]
 ```
 
-#### Required arguments
+| Option                   | Description                              | Default |
+|--------------------------|------------------------------------------|---------|
+| `-i`, `--input`          | Path to the Phase 2 validated findings   | —       |
+| `-o`, `--output`         | Write report metadata to a file          | —       |
+| `--cleanup-results`      | Path to Phase 3 cleanup results (optional) | —     |
+| `--notion-api-key`       | Notion integration API token             | —       |
+| `--notion-database-id`   | Existing Notion database ID              | —       |
+| `--notion-parent-page-id`| Notion page ID for new databases         | —       |
+| `--slack-webhook-url`    | Slack incoming webhook URL               | —       |
 
-| Argument       | Description                                                                          |
-|----------------|--------------------------------------------------------------------------------------|
-| `api_key`      | Your Devin API key (`apk_user_*` or `apk_*`)                                        |
-| `session_id`   | The ID of the session to send the message to                                         |
-| `message`      | The message text to send to Devin                                                    |
-
-#### Examples
-
-Send a message to a running session:
+### Examples
 
 ```bash
-python send_message.py apk_user_your_key_here abc-123-def-456 "Please also add unit tests"
+# Full pipeline: scan -> validate -> cleanup -> report
+python main.py scan myorg/myrepo
+python main.py validate results/scan_myorg_myrepo_20260307_120000.json
+python main.py cleanup results/validate_myorg_myrepo_20260307_121500.json
+python main.py report --input results/validate_myorg_myrepo_20260307_121500.json \
+    --cleanup-results results/cleanup_myorg_myrepo_20260307_123000.json
+
+# Or use the pipeline helper script
+./scripts/run_pipeline.sh --repo myorg/myrepo --phases scan,validate,cleanup,report
 ```
 
-## Sample output
-
-### Scanner (main.py)
-
-```
-[scanner] Creating Devin session to scan myorg/myrepo …
-[scanner] Session created: abc123
-[scanner] URL: https://app.devin.ai/sessions/abc123
-[scanner] Polling every 15s (timeout 900s) …
-[poll] abc123: running (working)
-[poll] abc123: running (finished)
-
-============================================================
-SCAN SUMMARY
-============================================================
-  Repository:     myorg/myrepo
-  Files scanned:  47
-  Feature flags:  5
-  Dead code:      12
-  Tech debt:      8
-
-  High-priority items:
-    - ENABLE_LEGACY_AUTH flag in src/auth.py:42 — always True, dead else branch
-    - 3 unused imports in src/utils.py
-============================================================
-```
-
-### send_message.py
-
-```
-Sending message to session abc-123-def-456 ...
-Message sent successfully.
-```
+Output files are written to `results/` with timestamped filenames by default
+(e.g. `results/scan_owner_repo_20260307_120000.json`).
 
 ### Output JSON structure
 
-Each finding includes fields for Part 2 hand-off:
+Each finding includes fields for Phase 2 hand-off:
 
 ```json
 {
@@ -216,14 +204,16 @@ Each finding includes fields for Part 2 hand-off:
 }
 ```
 
-Part 2 will iterate through each finding by `id`, perform deep verification,
-and update `verification_status` accordingly.
+Phase 2 iterates through each finding by `id`, performs deep verification,
+and updates `verification_status` to `"verified"`, `"false_positive"`, or `"needs_review"`.
 
 ## Why use the v1 API for sending messages?
 
 The v3 API's `send_message` endpoint requires the `ManageOrgSessions` permission, which is only available to **Enterprise** accounts with `cog_*` service user keys.
 
-If you have a **Teams** account, you can use the [v1 `send_message` endpoint](https://docs.devin.ai/api-reference/v1/sessions/send-a-message-to-an-existing-devin-session) instead. It accepts Personal API Keys (`apk_user_*`) and Service API Keys (`apk_*`), which are available on all account tiers. The `send_message.py` script wraps this endpoint for convenience.
+If you have a **Teams** account, you can use the [v1 `send_message` endpoint](https://docs.devin.ai/api-reference/v1/sessions/send-a-message-to-an-existing-devin-session) instead. It accepts Personal API Keys (`apk_user_*`) and Service API Keys (`apk_*`), which are available on all account tiers.
+
+The pipeline handles this automatically — it uses the v3 API for session creation and polling, and the v1 API (via the `--v1-api-key` flag) for `send_message()` calls.
 
 ## Web GUI
 
@@ -243,11 +233,14 @@ The GUI is available at **http://localhost:5000**.
 
 ### Features
 
-- **Tab navigation** across all four phases (Scan, Validate, Cleanup, Report)
-- **Form inputs** for all CLI arguments, including password-masked fields for API keys
-- **Live console output** streamed in real time via WebSocket as the subprocess runs
+- **Tab navigation** across all four phases (Scan, Validate, Cleanup PR's, Report)
+- **Dashboard** with 2x2 console grid for monitoring all phases simultaneously
+- **"Run All"** button to execute the full pipeline sequentially from the Dashboard
+- **Form inputs** for all CLI arguments, with password-masked fields for API keys
+- **Live console output** streamed in real time via WebSocket
 - **Stop button** to terminate a running process
-- **File discovery dropdowns** — for phases that require input files (Validate, Report), the server automatically scans the `results/` directory and presents matching files in a dropdown showing `owner/repo — YYYY-MM-DD HH:MM:SS UTC`. A "Custom path…" option is available as a fallback.
+- **File discovery dropdowns** — phases that require input files automatically
+  discover matching results from the `results/` directory
 
 ## CI / Scheduled Scanning
 
@@ -297,8 +290,6 @@ to get the JSON output files.
 
 ### Pipeline helper script
 
-You can also run the pipeline locally using the helper script:
-
 ```bash
 # Run scan only
 ./scripts/run_pipeline.sh --repo owner/repo --phases scan
@@ -318,96 +309,91 @@ Required environment variables: `DEVIN_API_KEY_V3`, `DEVIN_API_KEY_V1`,
 
 ```
 DevinDemo/
-├── main.py                     # CLI entrypoint
-├── requirements.txt
-├── list_sessions.py            # Standalone Devin API session lister (utility)
-├── send_message.py             # v1 API message sender (Teams workaround)
+├── main.py                        # CLI entrypoint — all 4 phases
+├── requirements.txt               # Runtime dependencies
+├── requirements-dev.txt           # Test dependencies
 ├── scripts/
-│   └── run_pipeline.sh         # Pipeline runner (chains phases sequentially)
+│   └── run_pipeline.sh            # Pipeline runner (chains phases sequentially)
 ├── .github/
 │   └── workflows/
-│       └── scan.yml            # GitHub Actions workflow (scheduled + manual)
+│       ├── scan.yml               # GitHub Actions workflow (scheduled + manual)
+│       └── scan-hourly.yml        # Hourly scan workflow
 ├── src/
 │   ├── api/
-│   │   └── client.py           # Devin v3 API client wrapper
+│   │   └── client.py              # Devin API client (v3 + v1)
 │   ├── scanner/
-│   │   └── identifier.py       # Part 1: Identification (implemented)
+│   │   └── identifier.py          # Phase 1: Identification
 │   ├── validator/
-│   │   └── validator.py        # Part 2: Validation (implemented)
+│   │   └── validator.py           # Phase 2: 8-layer validation
 │   ├── cleanup/
-│   │   └── cleanup.py          # Part 3: Cleanup PR generation (stub)
-│   └── reporter/
-│       ├── reporter.py         # Part 4: Reporting orchestrator
-│       ├── notion_reporter.py  # Notion database integration
-│       └── slack_notifier.py   # Slack webhook notifications
+│   │   └── cleanup.py             # Phase 3: Cleanup PR generation
+│   ├── reporter/
+│   │   ├── reporter.py            # Phase 4: Reporting orchestrator
+│   │   ├── notion_reporter.py     # Notion database integration
+│   │   └── slack_notifier.py      # Slack webhook notifications
+│   └── tracking/
+│       └── acu_tracker.py         # ACU usage tracking
 ├── web/
-│   ├── app.py                  # Flask + SocketIO web server
+│   ├── app.py                     # Flask + SocketIO web server
 │   └── templates/
-│       └── index.html          # Single-page GUI
-└── results/                    # Output files from pipeline runs
+│       ├── landing.html           # Landing page with pipeline overview
+│       └── index.html             # Dashboard GUI
+├── tests/                         # Unit tests (pytest)
+│   ├── conftest.py
+│   ├── test_api_client.py
+│   ├── test_scanner.py
+│   ├── test_validator.py
+│   ├── test_cleanup.py
+│   ├── test_reporter.py
+│   └── test_web.py
+└── results/                       # Output files (git-ignored)
+```
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+pytest --cov=src --cov-report=term-missing
 ```
 
 ## Assumptions & limitations
 
-These are documented so that contributors and users know the current scope.
-
 ### Target languages
-- **Python only** — the scanner currently analyses `.py` files.  Support for
-  other languages (JS/TS, Java, Go, etc.) is planned for future iterations.
+- **Python only** — the scanner analyses `.py` files.  Support for
+  other languages is planned for future iterations.
 
 ### Feature flag detection
-- **General patterns only** — we do NOT integrate with specific flag management
-  systems (LaunchDarkly, Unleash, Split, etc.).  Instead we look for:
-  - Environment variable checks that gate behaviour (`os.environ.get("FEATURE_…")`)
-  - Boolean configuration variables used in `if`/`else` branches
-  - Functions whose purpose is to check whether a feature is enabled
-  - Constants or settings that act as on/off switches
-- **Staleness signals** are prioritized in Phase 1: hardcoded constants with no
-  dynamic override, always-true/false branches, and flag names referencing old
-  versions or dates (e.g. `ENABLE_V2_MIGRATION`, `USE_NEW_AUTH_2023`).
-- This means some flags may be missed if they use unconventional patterns, and
-  some false positives are expected.  Part 2 (validation) will reduce noise.
+- **General patterns only** — no integration with specific flag management
+  systems (LaunchDarkly, Unleash, etc.).  Detection targets:
+  - Environment variable checks gating behaviour (`os.environ.get("FEATURE_...")`)
+  - Boolean config variables in `if`/`else` branches
+  - Functions that check whether a feature is enabled
+  - Constants/settings acting as on/off switches
+- **Staleness signals** are prioritised: hardcoded constants with no dynamic
+  override, always-true/false branches, and flag names referencing old versions
+  or dates (e.g. `ENABLE_V2_MIGRATION`, `USE_NEW_AUTH_2023`).
+- Phase 2 (validation) reduces false positives from Phase 1.
 
 ### Dead code detection
 - Unreachable branches (`if False:`, `if 0:`, always-true guards)
-- Functions/classes with **strong unused signals**: private (prefixed with `_`)
-  and never referenced in the same file, or in modules never imported. Framework
-  handlers, CLI commands, and test fixtures are intentionally skipped — Phase 2
-  performs full reachability analysis.
-- Unused imports are **deprioritized** — only flagged when the import is from a
-  non-existent or deprecated module. Routine unused imports are better handled
-  by linters.
-- Large blocks of commented-out code (≥3 lines of former source code, not docs)
+- Functions/classes with **strong unused signals**: private (prefixed `_`)
+  and never referenced, or in modules never imported
+- Framework handlers, CLI commands, and test fixtures are intentionally
+  skipped — Phase 2 performs full reachability analysis
+- Unused imports are **deprioritised** — only flagged when from non-existent
+  or deprecated modules
+- Large blocks of commented-out code (3+ lines of former source code)
 
 ### Tech debt detection
-- `TODO` / `FIXME` / `HACK` / `XXX` comments — **prioritises actionable items**
-  with staleness signals: ticket references, past version numbers, dates, or
-  phrases like "remove after" / "temporary workaround". Generic TODOs with no
-  actionable context are skipped.
+- `TODO` / `FIXME` / `HACK` / `XXX` comments — prioritises **actionable items**
+  with staleness signals (ticket references, past version numbers, dates)
 - Deprecated stdlib or third-party API usage (e.g. `optparse`, `imp`)
-- Python version compatibility shims (`sys.version` checks, `six` usage,
-  `try/except` import patterns for merged stdlib modules)
+- Python version compatibility shims (`sys.version` checks, `six` usage)
 
 ### Devin API
-- All four stages use the **Devin v3 API** with service user credentials.
-- **Part 1** (identify): smart Devin session scan — uses staleness signals and
-  strong unused indicators to flag candidates quickly. May include false
-  positives, which Phase 2 filters out.
-- **Part 2** (validate): deep-dive Devin sessions with **category-aware** Layer 1
-  validation. Commented-out code is verified as former source (not docs),
-  tech debt markers are checked for actionability, and feature flags are
-  confirmed as actual flag patterns. 8 layers total, slower but thorough.
-- **Part 3** (cleanup): Devin sessions that generate cleanup PRs.
-- **Part 4** (report): Devin sessions that publish summaries.
-- The `org_id` **must be provided explicitly** in the URL path — despite the
-  docs stating it can be omitted for org-scoped service users, omitting it
-  returns 404.
+- All four stages use the **Devin v3 API** for session creation and polling,
+  and the **v1 API** for `send_message()` and session details.
+- The `org_id` **must be provided explicitly** — omitting it returns 404.
 - Structured output (`structured_output_schema`) is used to get parseable
   JSON results from Devin sessions.
-
-## Utilities
-
-### `list_sessions.py`
-
-A standalone script to list all Devin sessions in your organization.
-See `python list_sessions.py --help` for usage.
