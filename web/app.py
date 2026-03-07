@@ -915,14 +915,16 @@ def handle_request_state(data=None):
         ra_buf = list(_runall_buffer)  # snapshot
 
     if ra_active or ra_buf:
-        # Replay buffered events
-        for entry in ra_buf:
-            socketio.emit(entry["event"], entry["payload"], to=caller_sid)
-        # Tell client whether the pipeline is still running
+        # Send state_restore FIRST so the frontend sets runAllActive=true
+        # and is ready to accept the replayed console_output events.
         socketio.emit("state_restore", {
             "runall_active": ra_active,
             "runall_phase_index": ra_phase_index,
+            "has_buffer": bool(ra_buf),
         }, to=caller_sid)
+        # Replay buffered events (console_output, run_all_phase, process_done)
+        for entry in ra_buf:
+            socketio.emit(entry["event"], entry["payload"], to=caller_sid)
 
     # --- Per-phase state ---
     for phase in _VALID_PHASES:
