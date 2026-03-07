@@ -2023,7 +2023,7 @@
             html += '<div class="chart-card"><h3>Issues by Confidence</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-confidence"></canvas></div></div>';
             html += '</div>';
 
-            // PR Links
+            // Opened PR Links
             html += '<div class="dashboard-pr-links"><h3>Opened PRs</h3>';
             if (data.pr_links.length > 0) {
                 html += '<ul class="pr-link-list">';
@@ -2035,7 +2035,25 @@
                 });
                 html += '</ul>';
             } else {
-                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No PRs have been opened yet. Run Phase 3 (Cleanup) to generate removal PRs.</p>';
+                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No open PRs. Either none have been created yet, or all have been merged.</p>';
+            }
+            html += '</div>';
+
+            // Merged PR Links
+            var mergedPrs = data.merged_prs || [];
+            html += '<div class="dashboard-pr-links"><h3>Merged PRs</h3>';
+            if (mergedPrs.length > 0) {
+                html += '<ul class="pr-link-list">';
+                mergedPrs.forEach(function(pr) {
+                    html += '<li>';
+                    html += '<a href="' + escapeHtml(pr.url) + '" target="_blank">' + escapeHtml(pr.url) + '</a>';
+                    html += '<span class="pr-link-file">' + escapeHtml(pr.file) + '</span>';
+                    html += '<span class="badge badge-high" style="margin-left:0.5rem;font-size:0.625rem;">MERGED</span>';
+                    html += '</li>';
+                });
+                html += '</ul>';
+            } else {
+                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No merged PRs yet.</p>';
             }
             html += '</div>';
 

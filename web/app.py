@@ -10,6 +10,7 @@ import sys
 import threading
 from pathlib import Path
 
+import requests as _requests
 from flask import Flask, jsonify, render_template
 from flask_socketio import SocketIO, emit
 
@@ -237,6 +238,33 @@ def _safe_read_json(file_path: str) -> dict | list | None:
         return None
 
 
+# Regex to extract owner, repo, and PR number from a GitHub PR URL.
+_GH_PR_URL_RE = re.compile(
+    r"https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
+)
+
+
+def _check_pr_merged(pr_url: str) -> bool:
+    """Return ``True`` if the GitHub PR at *pr_url* has been merged.
+
+    Uses the GitHub REST API (unauthenticated).  Returns ``False`` on any
+    error (network, auth, non-GitHub URL, etc.) so the PR stays in the
+    "opened" bucket by default.
+    """
+    m = _GH_PR_URL_RE.match(pr_url)
+    if not m:
+        return False
+    owner, repo, number = m.group("owner"), m.group("repo"), m.group("number")
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}"
+    try:
+        resp = _requests.get(api_url, timeout=5, headers={"Accept": "application/vnd.github.v3+json"})
+        if resp.status_code == 200:
+            return resp.json().get("merged", False)
+    except Exception:
+        pass
+    return False
+
+
 @app.route("/api/dashboard-data")
 def api_dashboard_data():
     """Return aggregated dashboard data from validate and cleanup results.
@@ -294,7 +322,7 @@ def api_dashboard_data():
             candidates.append(entry)
 
     # --- Load PR links from cleanup results for the same repo ---
-    pr_links: list[dict] = []
+    all_pr_links: list[dict] = []
     repo_name = data.get("repo", "unknown")
     cleanup_files = _discover_result_files("cleanup", repo_filter=repo_name)
     for cf in cleanup_files:
@@ -305,7 +333,7 @@ def api_dashboard_data():
         items = cleanup_data if isinstance(cleanup_data, list) else []
         for item in items:
             if item.get("status") == "pr_opened" and item.get("pr_url", "").startswith("http"):
-                pr_links.append({
+                all_pr_links.append({
                     "candidate_id": item.get("candidate_id", ""),
                     "file": item.get("file", ""),
                     "url": item["pr_url"],
@@ -315,13 +343,23 @@ def api_dashboard_data():
     for c in candidates:
         if c.get("pr_url") and c["pr_url"].startswith("http"):
             # Avoid duplicates (same URL)
-            existing_urls = {pl["url"] for pl in pr_links}
+            existing_urls = {pl["url"] for pl in all_pr_links}
             if c["pr_url"] not in existing_urls:
-                pr_links.append({
+                all_pr_links.append({
                     "candidate_id": c["id"],
                     "file": c["file"],
                     "url": c["pr_url"],
                 })
+
+    # --- Check merge status of PRs via GitHub API ---
+    opened_prs: list[dict] = []
+    merged_prs: list[dict] = []
+    for pr in all_pr_links:
+        merged = _check_pr_merged(pr["url"])
+        if merged:
+            merged_prs.append(pr)
+        else:
+            opened_prs.append(pr)
 
     # --- Build aggregations ---
     by_type: dict[str, int] = {}
@@ -340,7 +378,8 @@ def api_dashboard_data():
         "total_candidates": len(candidates),
         "by_type": by_type,
         "by_confidence": by_confidence,
-        "pr_links": pr_links,
+        "pr_links": opened_prs,
+        "merged_prs": merged_prs,
         "candidates": candidates,
     })
 
