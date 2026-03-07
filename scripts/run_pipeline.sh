@@ -9,6 +9,11 @@
 #   DEVIN_API_KEY_V3  — Devin v3 API key (cog_*)
 #   DEVIN_API_KEY_V1  — Devin v1 API key (apk_*)
 #   DEVIN_ORG_ID      — Devin organization ID (org-*)
+#
+# Environment variables (optional, for phase 4 — report):
+#   NOTION_API_KEY          — Notion integration API token
+#   NOTION_PARENT_PAGE_ID   — Notion page ID for creating databases
+#   SLACK_WEBHOOK_URL       — Slack incoming webhook URL
 
 set -euo pipefail
 
@@ -142,6 +147,16 @@ for phase in "${PHASE_LIST[@]}"; do
             REPORT_FLAGS=(--input "$LAST_VALIDATE_OUTPUT")
             if [[ -n "$LAST_CLEANUP_OUTPUT" ]]; then
                 REPORT_FLAGS+=(--cleanup-results "$LAST_CLEANUP_OUTPUT")
+            fi
+            # Pass Notion / Slack credentials if set
+            if [[ -n "${NOTION_API_KEY:-}" ]]; then
+                REPORT_FLAGS+=(--notion-api-key "$NOTION_API_KEY")
+            fi
+            if [[ -n "${NOTION_PARENT_PAGE_ID:-}" ]]; then
+                REPORT_FLAGS+=(--notion-parent-page-id "$NOTION_PARENT_PAGE_ID")
+            fi
+            if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
+                REPORT_FLAGS+=(--slack-webhook-url "$SLACK_WEBHOOK_URL")
             fi
             python "$REPO_ROOT/main.py" report "${REPORT_FLAGS[@]}"
             ;;
