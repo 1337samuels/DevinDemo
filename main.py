@@ -230,7 +230,6 @@ def cmd_validate(args: argparse.Namespace) -> None:
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
             max_acu_limit=args.max_acu,
-            progress_tracker_factory=ValidationProgressTracker,
             max_batch_size=args.max_batch_size,
         )
     except DevinAPIError as exc:
@@ -321,7 +320,6 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
             poll_interval=args.poll_interval,
             poll_timeout=args.poll_timeout,
             max_acu_limit=args.max_acu,
-            progress_tracker_factory=CleanupProgressTrackerFactory(),
             auto_merge=getattr(args, 'auto_merge', False),
         )
     except DevinAPIError as exc:
