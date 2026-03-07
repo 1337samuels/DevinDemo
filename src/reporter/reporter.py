@@ -21,11 +21,15 @@ class DebtReporter:
         notion_database_id: str | None = None,
         notion_parent_page_id: str | None = None,
         slack_webhook_url: str | None = None,
+        slack_bot_token: str | None = None,
+        slack_channel_id: str | None = None,
     ) -> None:
         self._notion_api_key = notion_api_key
         self._notion_database_id = notion_database_id
         self._notion_parent_page_id = notion_parent_page_id
         self._slack_webhook_url = slack_webhook_url
+        self._slack_bot_token = slack_bot_token
+        self._slack_channel_id = slack_channel_id
 
     @property
     def notion_database_id(self) -> str | None:
@@ -38,6 +42,8 @@ class DebtReporter:
         cleanup_results: list[dict[str, Any]] | None = None,
         *,
         targets: list[str] | None = None,
+        validate_file: str | None = None,
+        cleanup_file: str | None = None,
     ) -> dict[str, Any]:
         """Publish a tech-debt report to the configured targets.
 
@@ -85,6 +91,8 @@ class DebtReporter:
                 cleanup_results=cleanup_results,
                 candidates_processed=len(candidates),
                 repo=findings.get("repo"),
+                validate_file=validate_file,
+                cleanup_file=cleanup_file,
             )
 
         # --- stdout ---
@@ -128,8 +136,14 @@ class DebtReporter:
         cleanup_results: list[dict[str, Any]] | None,
         candidates_processed: int,
         repo: str | None = None,
+        validate_file: str | None = None,
+        cleanup_file: str | None = None,
     ) -> bool:
         """Send a single Slack summary with Notion link and PR URLs.
+
+        When ``slack_bot_token`` and ``slack_channel_id`` are configured,
+        also uploads the Phase 2 (validate) and Phase 3 (cleanup) JSON
+        result files to the Slack channel.
 
         Returns ``True`` only when the message is actually delivered.
         """
@@ -137,7 +151,11 @@ class DebtReporter:
             print("[reporter] Slack webhook not configured; skipping.")
             return False
 
-        notifier = SlackNotifier(self._slack_webhook_url)
+        notifier = SlackNotifier(
+            self._slack_webhook_url,
+            bot_token=self._slack_bot_token,
+            channel_id=self._slack_channel_id,
+        )
         try:
             notifier.notify_report_complete(
                 notion_database_id=notion_database_id,
@@ -145,10 +163,23 @@ class DebtReporter:
                 candidates_processed=candidates_processed,
                 repo=repo,
             )
-            return True
         except SlackNotifyError as exc:
             print(f"[reporter] WARNING: Slack notification failed: {exc}")
             return False
+
+        # Upload Phase 2 & 3 JSON files if bot token is configured
+        file_paths = [p for p in [validate_file, cleanup_file] if p]
+        if file_paths:
+            try:
+                repo_label = repo or "unknown repo"
+                notifier.upload_files(
+                    file_paths,
+                    comment=f"DevinDemo results for {repo_label}",
+                )
+            except SlackNotifyError as exc:
+                print(f"[reporter] WARNING: Slack file upload failed: {exc}")
+
+        return True
 
     @staticmethod
     def _print_stdout(
