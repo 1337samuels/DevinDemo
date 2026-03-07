@@ -166,16 +166,26 @@ def cmd_scan(args: argparse.Namespace) -> None:
             print(f"    - {item}")
     print("=" * 60)
 
-    output_path = args.output or _default_output_path("scan")
+    repo_name = results.get("repo", args.repo)
+    output_path = args.output or _default_output_path("scan", repo=repo_name)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as fh:
         json.dump(results, fh, indent=2)
     print(f"\nFull results written to {output_path}")
 
 
-def _default_output_path(prefix: str) -> str:
-    """Generate ``results/<prefix>_YYYYMMDD_HHMMSS.json``."""
+def _default_output_path(prefix: str, repo: str = "") -> str:
+    """Generate ``results/<prefix>[_<repo_slug>]_YYYYMMDD_HHMMSS.json``.
+
+    If *repo* is provided (e.g. ``owner/repo``), it is sanitised and
+    embedded in the filename so that result files are easily filterable
+    by repository.
+    """
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if repo:
+        # owner/repo -> owner_repo (safe for filenames)
+        slug = repo.replace("/", "_").replace("\\", "_")
+        return os.path.join("results", f"{prefix}_{slug}_{ts}.json")
     return os.path.join("results", f"{prefix}_{ts}.json")
 
 
@@ -233,7 +243,8 @@ def cmd_validate(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(3)
 
-    output_path = args.output or _default_output_path("validate")
+    repo_name = results.get("repo", "")
+    output_path = args.output or _default_output_path("validate", repo=repo_name)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as fh:
         json.dump(results, fh, indent=2)
@@ -321,7 +332,9 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     # Write cleanup results JSON
-    output_path = args.output or _default_output_path("cleanup")
+    # cleanup_results is a list; try to extract repo from the input findings
+    repo_name = findings.get("repo", "") if isinstance(findings, dict) else ""
+    output_path = args.output or _default_output_path("cleanup", repo=repo_name)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as fh:
         json.dump(cleanup_results, fh, indent=2)
@@ -409,6 +422,7 @@ _SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
     "NOTION_SECRET": ("notion_api_key", {"report"}),
     "NOTION_MASTER_PAGE_ID": ("notion_parent_page_id", {"report"}),
     "SLACK_WEBHOOK_URL": ("slack_webhook_url", {"report"}),
+    "SLACK_WEBHOOKS_URL": ("slack_webhook_url", {"report"}),
 }
 
 
@@ -665,7 +679,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_p.add_argument(
         "--slack-webhook-url",
-        default=_get_secret(secrets, "SLACK_WEBHOOK_URL"),
+        default=_get_secret(secrets, "SLACK_WEBHOOK_URL") or _get_secret(secrets, "SLACK_WEBHOOKS_URL"),
         help="Slack incoming webhook URL for report summary notification.",
     )
     report_p.set_defaults(func=cmd_report)

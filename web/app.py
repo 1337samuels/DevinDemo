@@ -42,23 +42,29 @@ RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 sys.path.insert(0, PROJECT_ROOT)
 from main import _load_secrets, _SECRETS_MAP  # noqa: E402
 
-# Regex to parse default output filenames: <prefix>_YYYYMMDD_HHMMSS.json
+# Regex to parse default output filenames.
+# Supports both legacy (no repo slug) and new (with repo slug) formats:
+#   <prefix>_YYYYMMDD_HHMMSS.json
+#   <prefix>_<owner>_<repo>_YYYYMMDD_HHMMSS.json
 _FILENAME_RE = re.compile(
     r"^(?P<prefix>scan|validate|cleanup|report)_"
+    r"(?:(?P<repo_slug>[A-Za-z0-9_.-]+_[A-Za-z0-9_.-]+)_)?"
     r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})_"
     r"(?P<hour>\d{2})(?P<minute>\d{2})(?P<second>\d{2})\.json$"
 )
 
 
-def _discover_result_files(prefix: str) -> list[dict]:
-    """Scan the results/ directory for files matching *prefix*_YYYYMMDD_HHMMSS.json.
+def _discover_result_files(prefix: str, repo_filter: str = "") -> list[dict]:
+    """Scan the results/ directory for files matching *prefix*.
 
-    For each file, parse the JSON to extract the 'repo' field and format the
-    timestamp from the filename.  Returns a list of dicts sorted newest-first:
-        [{"path": "results/scan_20260306_091500.json",
+    Supports both legacy and repo-slug filenames.
+    If *repo_filter* is given, only files belonging to that repo are returned.
+
+    Returns a list of dicts sorted newest-first:
+        [{"path": "results/validate_owner_repo_20260306_091500.json",
           "repo": "owner/repo",
           "datetime": "2026-03-06 09:15:00 UTC",
-          "label": "owner/repo  -  2026-03-06 09:15:00 UTC"}, ...]
+          "label": "owner/repo  \u2014  2026-03-06 09:15:00 UTC"}, ...]
     """
     results: list[dict] = []
     if not os.path.isdir(RESULTS_DIR):
@@ -78,27 +84,72 @@ def _discover_result_files(prefix: str) -> list[dict]:
             f"{m.group('hour')}:{m.group('minute')}:{m.group('second')} UTC"
         )
 
-        # Try to extract repo from JSON content
+        # Extract repo: prefer filename slug, fall back to JSON content
+        repo_slug = m.group("repo_slug") or ""
         repo = "unknown"
+        if repo_slug:
+            # Convert owner_repo back to owner/repo
+            # The slug has exactly one underscore separating owner and repo name
+            # but repo names may contain underscores, so we split on the first _
+            parts = repo_slug.split("_", 1)
+            repo = "/".join(parts) if len(parts) == 2 else repo_slug
+
+        # Always try JSON content for authoritative repo value
         try:
             with open(fpath, "r") as fh:
                 data = json.load(fh)
-                repo = data.get("repo", "unknown")
+                if isinstance(data, dict):
+                    json_repo = data.get("repo", "")
+                    if json_repo:
+                        repo = json_repo
         except (json.JSONDecodeError, OSError):
             pass
 
-        results.append(
-            {
-                "path": rel_path,
-                "repo": repo,
-                "datetime": dt_str,
-                "label": f"{repo}  \u2014  {dt_str}",
-            }
-        )
+        # Apply repo filter if specified
+        if repo_filter and repo != repo_filter:
+            continue
+
+        results.append({
+            "path": rel_path,
+            "repo": repo,
+            "datetime": dt_str,
+            "label": f"{repo}  \u2014  {dt_str}",
+        })
 
     # Sort newest first (by datetime string, which is lexicographically sortable)
     results.sort(key=lambda r: r["datetime"], reverse=True)
     return results
+
+
+def _discover_all_repos() -> list[str]:
+    """Return a sorted, deduplicated list of repo names across all result files."""
+    repos: set[str] = set()
+    if not os.path.isdir(RESULTS_DIR):
+        return []
+    for fname in os.listdir(RESULTS_DIR):
+        m = _FILENAME_RE.match(fname)
+        if not m:
+            continue
+        fpath = os.path.join(RESULTS_DIR, fname)
+        # Try filename slug first
+        repo_slug = m.group("repo_slug") or ""
+        repo = ""
+        if repo_slug:
+            parts = repo_slug.split("_", 1)
+            repo = "/".join(parts) if len(parts) == 2 else repo_slug
+        # Try JSON content for authoritative value
+        try:
+            with open(fpath, "r") as fh:
+                data = json.load(fh)
+                if isinstance(data, dict):
+                    json_repo = data.get("repo", "")
+                    if json_repo:
+                        repo = json_repo
+        except (json.JSONDecodeError, OSError):
+            pass
+        if repo and repo != "unknown":
+            repos.add(repo)
+    return sorted(repos)
 
 
 @app.route("/")
@@ -127,6 +178,7 @@ def api_secrets():
         "API_V1_KEY": ["scan-v1-api-key", "validate-v1-api-key", "cleanup-v1-api-key", "runall-v1-api-key"],
         "ORG_ID": ["scan-org-id", "validate-org-id", "cleanup-org-id", "runall-org-id"],
         "SLACK_WEBHOOK_URL": ["report-slack-webhook-url", "runall-slack-webhook-url"],
+        "SLACK_WEBHOOKS_URL": ["report-slack-webhook-url", "runall-slack-webhook-url"],
         "NOTION_SECRET": ["report-notion-api-key", "runall-notion-api-key"],
         "NOTION_MASTER_PAGE_ID": ["report-notion-parent-page-id", "runall-notion-parent-page-id"],
     }
@@ -147,12 +199,150 @@ def api_validation_layers():
     ])
 
 
+@app.route("/api/repos")
+def api_repos():
+    """Return a list of unique repos found across all result files."""
+    return jsonify(_discover_all_repos())
+
+
 @app.route("/api/results/<prefix>")
 def api_results(prefix: str):
-    """Return available result files for a given phase prefix."""
+    """Return available result files for a given phase prefix.
+
+    Query params:
+        repo: optional repo name to filter by (e.g. ``owner/repo``).
+    """
     if prefix not in ("scan", "validate", "cleanup", "report"):
         return jsonify({"error": "Invalid prefix"}), 400
-    return jsonify(_discover_result_files(prefix))
+    from flask import request as flask_request
+    repo_filter = flask_request.args.get("repo", "").strip()
+    return jsonify(_discover_result_files(prefix, repo_filter=repo_filter))
+
+
+def _safe_read_json(file_path: str) -> dict | list | None:
+    """Read and return parsed JSON from *file_path* (relative to PROJECT_ROOT).
+
+    Returns ``None`` if the path escapes the project root or the file is
+    unreadable.
+    """
+    abs_path = os.path.realpath(os.path.join(PROJECT_ROOT, file_path))
+    if not abs_path.startswith(os.path.realpath(PROJECT_ROOT) + os.sep):
+        return None
+    if not os.path.isfile(abs_path):
+        return None
+    try:
+        with open(abs_path, "r") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+@app.route("/api/dashboard-data")
+def api_dashboard_data():
+    """Return aggregated dashboard data from validate and cleanup results.
+
+    Query params:
+        repo: optional repo name to filter files by.
+        file: optional path to a specific validate result file.
+              If omitted, the most recent validate result (for the repo) is used.
+    """
+    from flask import request as flask_request
+
+    repo_filter = flask_request.args.get("repo", "").strip()
+    file_path = flask_request.args.get("file", "").strip()
+
+    # --- Load validate data ---
+    if not file_path:
+        results = _discover_result_files("validate", repo_filter=repo_filter)
+        if not results:
+            return jsonify({"error": "No validate results found"}), 404
+        file_path = results[0]["path"]
+
+    data = _safe_read_json(file_path)
+    if data is None:
+        return jsonify({"error": f"Cannot read file: {file_path}"}), 404
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid validate result format"}), 400
+
+    # --- Aggregate candidates from validate data ---
+    candidates: list[dict] = []
+    category_map = {
+        "feature_flags": "feature_flag",
+        "dead_code": "dead_code",
+        "tech_debt": "tech_debt",
+    }
+    for key, cat_label in category_map.items():
+        for item in data.get(key, []):
+            entry = {
+                "id": item.get("id", ""),
+                "category": item.get("category", cat_label),
+                "file": item.get("file", ""),
+                "line": item.get("line", 0),
+                "confidence": "UNKNOWN",
+                "pr_url": None,
+                "pr_opened": False,
+                "summary": "",
+            }
+            validation = item.get("validation", {})
+            if validation:
+                entry["confidence"] = validation.get("confidence", "UNKNOWN")
+                entry["summary"] = validation.get("summary", "")
+                entry["pr_url"] = validation.get("pr_url")
+                entry["pr_opened"] = validation.get("pr_opened", False)
+                if not entry["pr_url"]:
+                    entry["pr_url"] = validation.get("suggested_pr_title")
+            candidates.append(entry)
+
+    # --- Load PR links from cleanup results for the same repo ---
+    pr_links: list[dict] = []
+    repo_name = data.get("repo", "unknown")
+    cleanup_files = _discover_result_files("cleanup", repo_filter=repo_name)
+    for cf in cleanup_files:
+        cleanup_data = _safe_read_json(cf["path"])
+        if cleanup_data is None:
+            continue
+        # Cleanup results are a list of per-candidate result dicts
+        items = cleanup_data if isinstance(cleanup_data, list) else []
+        for item in items:
+            if item.get("status") == "pr_opened" and item.get("pr_url", "").startswith("http"):
+                pr_links.append({
+                    "candidate_id": item.get("candidate_id", ""),
+                    "file": item.get("file", ""),
+                    "url": item["pr_url"],
+                })
+
+    # Also pick up PR links from validate data (inline pr_url fields)
+    for c in candidates:
+        if c.get("pr_url") and c["pr_url"].startswith("http"):
+            # Avoid duplicates (same URL)
+            existing_urls = {pl["url"] for pl in pr_links}
+            if c["pr_url"] not in existing_urls:
+                pr_links.append({
+                    "candidate_id": c["id"],
+                    "file": c["file"],
+                    "url": c["pr_url"],
+                })
+
+    # --- Build aggregations ---
+    by_type: dict[str, int] = {}
+    by_confidence: dict[str, int] = {}
+
+    for c in candidates:
+        cat = c["category"]
+        by_type[cat] = by_type.get(cat, 0) + 1
+
+        conf = c["confidence"]
+        by_confidence[conf] = by_confidence.get(conf, 0) + 1
+
+    return jsonify({
+        "file": file_path,
+        "repo": repo_name,
+        "total_candidates": len(candidates),
+        "by_type": by_type,
+        "by_confidence": by_confidence,
+        "pr_links": pr_links,
+        "candidates": candidates,
+    })
 
 
 # Keys/secrets that should be masked in console output

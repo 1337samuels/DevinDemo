@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DevinDemo Pipeline</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -428,6 +429,268 @@
             color: var(--yellow);
         }
 
+        /* Top-level mode tabs */
+        .mode-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .mode-tab {
+            padding: 0.5rem 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text-muted);
+            font-size: 0.9375rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+
+        .mode-tab:hover {
+            color: var(--text);
+            border-color: var(--accent);
+        }
+
+        .mode-tab.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .mode-panel { display: none; }
+        .mode-panel.active { display: block; }
+
+        /* Dashboard styles */
+        .dashboard-file-selector {
+            margin-bottom: 1.5rem;
+        }
+
+        .dashboard-file-selector select {
+            padding: 0.5rem 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text);
+            font-size: 0.875rem;
+            font-family: inherit;
+            min-width: 400px;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b8fa3' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            padding-right: 2rem;
+            cursor: pointer;
+        }
+
+        .dashboard-file-selector select option {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .dashboard-file-selector label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: block;
+            margin-bottom: 0.375rem;
+        }
+
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            text-align: center;
+        }
+
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1;
+        }
+
+        .stat-card .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.5rem;
+        }
+
+        .stat-card.high .stat-value { color: var(--green); }
+        .stat-card.medium .stat-value { color: var(--yellow); }
+        .stat-card.low .stat-value { color: var(--red); }
+
+        .dashboard-charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .chart-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+        }
+
+        .chart-card h3 {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .chart-canvas-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 280px;
+            margin: 0 auto;
+        }
+
+        .dashboard-pr-links {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+        }
+
+        .dashboard-pr-links h3 {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .pr-link-list {
+            list-style: none;
+        }
+
+        .pr-link-list li {
+            padding: 0.625rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .pr-link-list li:last-child {
+            border-bottom: none;
+        }
+
+        .pr-link-list a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.875rem;
+        }
+
+        .pr-link-list a:hover {
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
+
+        .pr-link-file {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+        }
+
+        .dashboard-empty {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .dashboard-empty h3 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: var(--text);
+        }
+
+        .dashboard-candidates {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            margin-top: 1.5rem;
+        }
+
+        .dashboard-candidates h3 {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .candidates-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+
+        .candidates-table th {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 2px solid var(--border);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.6875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .candidates-table td {
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        .candidates-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.125rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-high { background: rgba(34,197,94,0.15); color: var(--green); }
+        .badge-medium { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .badge-low { background: rgba(239,68,68,0.15); color: var(--red); }
+        .badge-exempt { background: rgba(139,143,163,0.15); color: var(--text-muted); }
+        .badge-unknown { background: rgba(139,143,163,0.15); color: var(--text-muted); }
+
+        .badge-feature_flag { background: rgba(96,165,250,0.15); color: #60a5fa; }
+        .badge-dead_code { background: rgba(239,68,68,0.15); color: var(--red); }
+        .badge-tech_debt { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .badge-unused_import { background: rgba(168,130,220,0.15); color: #a882dc; }
+        .badge-boolean_config_variable { background: rgba(96,165,250,0.15); color: #60a5fa; }
+
         /* Layer checkboxes */
         .layer-checkboxes {
             display: grid;
@@ -559,6 +822,47 @@
             </a>
         </header>
 
+        <!-- Top-level mode tabs -->
+        <div class="mode-tabs">
+            <button class="mode-tab active" data-mode="dashboard">Dashboard</button>
+            <button class="mode-tab" data-mode="cnc">CNC</button>
+        </div>
+
+        <!-- Dashboard mode -->
+        <div class="mode-panel active" id="mode-dashboard">
+            <div class="dashboard-file-selector" style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
+                <div>
+                    <label>Repository</label>
+                    <select id="dashboard-repo-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Result File</label>
+                    <select id="dashboard-file-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+            </div>
+            <div id="dashboard-content">
+                <div class="dashboard-empty">
+                    <h3>No data loaded</h3>
+                    <p>Select a repository and result file above, or run a validation first.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- CNC mode -->
+        <div class="mode-panel" id="mode-cnc">
+
+        <!-- CNC Repo filter -->
+        <div class="dashboard-file-selector" style="margin-bottom:1rem;">
+            <label>Repository Filter</label>
+            <select id="cnc-repo-select">
+                <option value="">All repositories</option>
+            </select>
+        </div>
+
         <!-- Phase tabs -->
         <div class="tabs">
             <button class="tab active" data-phase="dashboard">Dashboard</button>
@@ -625,23 +929,23 @@
                 <div class="pipeline-step" id="pipeline-step-3">Phase 4: Report</div>
             </div>
 
-            <!-- 2x2 per-phase console grid -->
+            <!-- 2x2 per-phase console grid (mirrors of individual phase consoles) -->
             <div class="dashboard-consoles">
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 1: Scan</h3></div>
-                    <div class="console-panel" id="console-scan"></div>
+                    <div class="console-panel" id="dash-console-scan"></div>
                 </div>
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 2: Validate</h3></div>
-                    <div class="console-panel" id="console-validate"></div>
+                    <div class="console-panel" id="dash-console-validate"></div>
                 </div>
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 3: Cleanup</h3></div>
-                    <div class="console-panel" id="console-cleanup"></div>
+                    <div class="console-panel" id="dash-console-cleanup"></div>
                 </div>
                 <div class="console-wrapper">
                     <div class="console-header"><h3>Phase 4: Report</h3></div>
-                    <div class="console-panel" id="console-report"></div>
+                    <div class="console-panel" id="dash-console-report"></div>
                 </div>
             </div>
         </div>
@@ -825,7 +1129,7 @@
                 <div class="form-group full-width">
                     <label class="checkbox-label">
                         <input type="checkbox" id="cleanup-auto-merge" />
-                        Should Auto-Merge High Confidence PRs?
+                        Should Auto-Merge High Confidence PRs? (Brave Mode)
                     </label>
                 </div>
 
@@ -952,6 +1256,8 @@
                 <div class="console" id="console-report"></div>
             </div>
         </div>
+
+        </div><!-- end mode-cnc -->
     </div>
 
     <script>
@@ -1031,7 +1337,7 @@
 
         // ----- File dropdown management -----
 
-        async function loadFileDropdown(selectId) {
+        async function loadFileDropdown(selectId, repoFilter) {
             const select = document.getElementById(selectId);
             if (!select) return;
             const fileType = select.dataset.fileType;
@@ -1039,7 +1345,11 @@
             const prevValue = select.value;
             select.innerHTML = '<option value="">Loading...</option>';
             try {
-                const resp = await fetch('/api/results/' + fileType);
+                let url = '/api/results/' + fileType;
+                if (repoFilter) {
+                    url += '?repo=' + encodeURIComponent(repoFilter);
+                }
+                const resp = await fetch(url);
                 const files = await resp.json();
                 select.innerHTML = '';
                 if (files.length === 0) {
@@ -1106,14 +1416,20 @@
             sel.addEventListener('change', function() { onFileDropdownChange(sel.id); });
         });
 
+        function getCncRepoFilter() {
+            const sel = document.getElementById('cnc-repo-select');
+            return sel ? sel.value : '';
+        }
+
         function loadAllDropdowns() {
+            const repoFilter = getCncRepoFilter();
             document.querySelectorAll('.file-dropdown').forEach(function(sel) {
-                loadFileDropdown(sel.id);
+                loadFileDropdown(sel.id, repoFilter);
             });
         }
         loadAllDropdowns();
 
-        // ----- Dashboard: move console panels in/out of the grid -----
+        // ----- Dashboard: sync console mirrors -----
 
         const PHASES = ['scan', 'validate', 'cleanup', 'report'];
         const PHASE_LABELS = {
@@ -1122,35 +1438,17 @@
             cleanup: "Phase 3: Cleanup PR's",
             report: 'Phase 4: Report'
         };
-        const dashboardGrid = document.getElementById('dashboard-grid');
 
-        // Original parent locations so we can move consoles back
-        const consoleHomeParent = {};
-        PHASES.forEach(function(p) {
-            const panel = document.getElementById('console-panel-' + p);
-            consoleHomeParent[p] = panel.parentElement;
-        });
-
-        function populateDashboard() {
+        // Sync existing content from phase consoles to their dashboard mirrors
+        function syncDashboardConsoles() {
             PHASES.forEach(function(p) {
-                const panel = document.getElementById('console-panel-' + p);
-                // Update header to show phase name in dashboard view
-                panel.querySelector('.console-header h3').innerHTML =
-                    '<span class="status-dot' +
-                    (phaseRunning[p] ? ' running' : '') +
-                    '" id="status-dot-' + p + '"></span> ' + PHASE_LABELS[p];
-                dashboardGrid.appendChild(panel);
+                const src = document.getElementById('console-' + p);
+                const mirror = document.getElementById('dash-console-' + p);
+                if (src && mirror) {
+                    mirror.innerHTML = src.innerHTML;
+                    mirror.scrollTop = mirror.scrollHeight;
+                }
             });
-        }
-
-        function restoreConsole(phase) {
-            const panel = document.getElementById('console-panel-' + phase);
-            // Restore simple "Console" header when inside its own phase tab
-            panel.querySelector('.console-header h3').innerHTML =
-                '<span class="status-dot' +
-                (phaseRunning[phase] ? ' running' : '') +
-                '" id="status-dot-' + phase + '"></span> Console';
-            consoleHomeParent[phase].appendChild(panel);
         }
 
         // ----- Secrets auto-fill -----
@@ -1186,10 +1484,7 @@
                 document.getElementById('panel-' + currentPhase).classList.add('active');
 
                 if (currentPhase === 'dashboard') {
-                    populateDashboard();
-                } else {
-                    // Move all consoles back to their home panels
-                    PHASES.forEach(restoreConsole);
+                    syncDashboardConsoles();
                 }
                 loadAllDropdowns();
             });
@@ -1197,29 +1492,32 @@
 
         // ----- Per-phase console output via SocketIO -----
 
+        // Helper: append a span to a console element
+        function appendToConsole(consoleEl, text, className) {
+            if (!consoleEl) return;
+            const span = document.createElement('span');
+            if (className) span.className = className;
+            span.textContent = text;
+            consoleEl.appendChild(span);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
         function setupPhaseConsole(phase) {
-            // Query DOM dynamically (elements move between phase panels and dashboard)
             socket.on('console_output_' + phase, (msg) => {
-                const consoleEl = document.getElementById('console-' + phase);
-                if (!consoleEl) return;
-                const span = document.createElement('span');
                 const text = msg.data;
-                if (text.startsWith('$')) {
-                    span.className = 'cmd';
-                }
-                span.textContent = text;
-                consoleEl.appendChild(span);
-                consoleEl.scrollTop = consoleEl.scrollHeight;
+                const cls = text.startsWith('$') ? 'cmd' : '';
+                // Write to phase console
+                appendToConsole(document.getElementById('console-' + phase), text, cls);
+                // Mirror to dashboard grid console
+                appendToConsole(document.getElementById('dash-console-' + phase), text, cls);
             });
 
             socket.on('process_done_' + phase, (msg) => {
-                const consoleEl = document.getElementById('console-' + phase);
-                if (!consoleEl) return;
-                const span = document.createElement('span');
-                span.className = msg.success ? 'success' : 'error';
-                span.textContent = msg.data;
-                consoleEl.appendChild(span);
-                consoleEl.scrollTop = consoleEl.scrollHeight;
+                const cls = msg.success ? 'success' : 'error';
+                // Write to phase console
+                appendToConsole(document.getElementById('console-' + phase), msg.data, cls);
+                // Mirror to dashboard grid console
+                appendToConsole(document.getElementById('dash-console-' + phase), msg.data, cls);
 
                 phaseRunning[phase] = false;
                 const statusDot = document.getElementById('status-dot-' + phase);
@@ -1239,14 +1537,10 @@
             const text = msg.data;
             const phase = msg.phase;
             if (phase && runAllActive) {
-                const dashPanel = document.getElementById('console-' + phase);
-                if (dashPanel) {
-                    const span = document.createElement('span');
-                    if (text.startsWith('$')) span.className = 'cmd';
-                    span.textContent = text;
-                    dashPanel.appendChild(span);
-                    dashPanel.scrollTop = dashPanel.scrollHeight;
-                }
+                const cls = text.startsWith('$') ? 'cmd' : '';
+                // Write to both the phase console and the dashboard mirror
+                appendToConsole(document.getElementById('console-' + phase), text, cls);
+                appendToConsole(document.getElementById('dash-console-' + phase), text, cls);
             }
         });
 
@@ -1466,18 +1760,340 @@
         function clearConsole(phase) {
             if (!phase) phase = currentPhase;
             if (phase === 'dashboard') {
-                // Clear all dashboard per-phase consoles
+                // Clear all phase consoles and their dashboard mirrors
                 ['scan', 'validate', 'cleanup', 'report'].forEach(p => {
                     const el = document.getElementById('console-' + p);
                     if (el) el.innerHTML = '';
+                    const mirror = document.getElementById('dash-console-' + p);
+                    if (mirror) mirror.innerHTML = '';
                 });
                 return;
             }
             const el = document.getElementById('console-' + phase);
             if (el) el.innerHTML = '';
+            const mirror = document.getElementById('dash-console-' + phase);
+            if (mirror) mirror.innerHTML = '';
             const dot = document.getElementById('status-dot-' + phase);
             if (dot && !phaseRunning[phase]) dot.className = 'status-dot';
         }
+
+        // ===== REPO SELECTOR =====
+
+        async function loadRepoSelector(selectId, opts) {
+            opts = opts || {};
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            const prevValue = select.value;
+            const emptyLabel = opts.emptyLabel || 'All repositories';
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const resp = await fetch('/api/repos');
+                const repos = await resp.json();
+                select.innerHTML = '';
+                const allOpt = document.createElement('option');
+                allOpt.value = '';
+                allOpt.textContent = emptyLabel;
+                select.appendChild(allOpt);
+                repos.forEach(function(r) {
+                    const opt = document.createElement('option');
+                    opt.value = r;
+                    opt.textContent = r;
+                    select.appendChild(opt);
+                });
+                if (prevValue && Array.from(select.options).some(function(o) { return o.value === prevValue; })) {
+                    select.value = prevValue;
+                } else if (repos.length === 1) {
+                    // Auto-select if only one repo
+                    select.value = repos[0];
+                }
+            } catch (err) {
+                select.innerHTML = '<option value="">Error loading repos</option>';
+            }
+        }
+
+        // CNC repo filter: reload file dropdowns when repo changes
+        document.getElementById('cnc-repo-select').addEventListener('change', function() {
+            loadAllDropdowns();
+        });
+
+        // ===== MODE SWITCHING (Dashboard / CNC) =====
+
+        let currentMode = 'dashboard';
+
+        document.querySelectorAll('.mode-tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.mode-tab').forEach(function(t) { t.classList.remove('active'); });
+                document.querySelectorAll('.mode-panel').forEach(function(p) { p.classList.remove('active'); });
+                tab.classList.add('active');
+                currentMode = tab.dataset.mode;
+                document.getElementById('mode-' + currentMode).classList.add('active');
+                if (currentMode === 'dashboard') {
+                    loadDashboardRepoSelect();
+                } else if (currentMode === 'cnc') {
+                    loadRepoSelector('cnc-repo-select', {emptyLabel: 'All repositories'});
+                    loadAllDropdowns();
+                }
+            });
+        });
+
+        // ===== DASHBOARD =====
+
+        let typeChart = null;
+        let confidenceChart = null;
+
+        async function loadDashboardRepoSelect() {
+            await loadRepoSelector('dashboard-repo-select', {emptyLabel: 'Select a repository\u2026'});
+            // After loading repos, load the file select for the selected repo
+            loadDashboardFileSelect();
+        }
+
+        async function loadDashboardFileSelect() {
+            const repoSelect = document.getElementById('dashboard-repo-select');
+            const select = document.getElementById('dashboard-file-select');
+            if (!select) return;
+            const repoFilter = repoSelect ? repoSelect.value : '';
+            const prevValue = select.value;
+            select.innerHTML = '<option value="">Loading...</option>';
+            try {
+                let url = '/api/results/validate';
+                if (repoFilter) {
+                    url += '?repo=' + encodeURIComponent(repoFilter);
+                }
+                const resp = await fetch(url);
+                const files = await resp.json();
+                select.innerHTML = '';
+                if (files.length === 0) {
+                    const empty = document.createElement('option');
+                    empty.value = '';
+                    empty.textContent = repoFilter
+                        ? 'No validate results for this repo'
+                        : 'No validate results found — run a validation first';
+                    select.appendChild(empty);
+                } else {
+                    files.forEach(function(f, idx) {
+                        const opt = document.createElement('option');
+                        opt.value = f.path;
+                        opt.textContent = f.label;
+                        select.appendChild(opt);
+                    });
+                    // Auto-select first (most recent) if nothing was selected
+                    if (prevValue && Array.from(select.options).some(function(o) { return o.value === prevValue; })) {
+                        select.value = prevValue;
+                    } else {
+                        select.value = files[0].path;
+                    }
+                    loadDashboardData(select.value);
+                }
+            } catch (err) {
+                select.innerHTML = '';
+                const errOpt = document.createElement('option');
+                errOpt.value = '';
+                errOpt.textContent = 'Error loading files';
+                select.appendChild(errOpt);
+            }
+        }
+
+        document.getElementById('dashboard-repo-select').addEventListener('change', function() {
+            loadDashboardFileSelect();
+        });
+
+        document.getElementById('dashboard-file-select').addEventListener('change', function() {
+            if (this.value) {
+                loadDashboardData(this.value);
+            }
+        });
+
+        async function loadDashboardData(filePath) {
+            const container = document.getElementById('dashboard-content');
+            if (!filePath) {
+                container.innerHTML = '<div class="dashboard-empty"><h3>No data loaded</h3><p>Select a validate result file above.</p></div>';
+                return;
+            }
+
+            container.innerHTML = '<div class="dashboard-empty"><p>Loading dashboard data...</p></div>';
+
+            try {
+                const repoSelect = document.getElementById('dashboard-repo-select');
+                const repoFilter = repoSelect ? repoSelect.value : '';
+                let url = '/api/dashboard-data?file=' + encodeURIComponent(filePath);
+                if (repoFilter) {
+                    url += '&repo=' + encodeURIComponent(repoFilter);
+                }
+                const resp = await fetch(url);
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    container.innerHTML = '<div class="dashboard-empty"><h3>Error</h3><p>' + (err.error || 'Unknown error') + '</p></div>';
+                    return;
+                }
+                const data = await resp.json();
+                renderDashboard(data);
+            } catch (err) {
+                container.innerHTML = '<div class="dashboard-empty"><h3>Error</h3><p>' + err.message + '</p></div>';
+            }
+        }
+
+        function renderDashboard(data) {
+            const container = document.getElementById('dashboard-content');
+
+            // Count by confidence
+            const highCount = data.by_confidence['HIGH'] || 0;
+            const medCount = data.by_confidence['MEDIUM'] || 0;
+            const lowCount = data.by_confidence['LOW'] || 0;
+            const exemptCount = data.by_confidence['EXEMPT'] || 0;
+
+            let html = '';
+
+            // Repo header
+            html += '<div style="margin-bottom:1rem;color:var(--text-muted);font-size:0.8125rem;">';
+            html += 'Repository: <strong style="color:var(--text);">' + escapeHtml(data.repo) + '</strong>';
+            html += ' &mdash; ' + escapeHtml(data.file);
+            html += '</div>';
+
+            // Summary stat cards
+            html += '<div class="dashboard-stats">';
+            html += '<div class="stat-card"><div class="stat-value">' + data.total_candidates + '</div><div class="stat-label">Total Candidates</div></div>';
+            html += '<div class="stat-card high"><div class="stat-value">' + highCount + '</div><div class="stat-label">High Confidence</div></div>';
+            html += '<div class="stat-card medium"><div class="stat-value">' + medCount + '</div><div class="stat-label">Medium Confidence</div></div>';
+            html += '<div class="stat-card low"><div class="stat-value">' + (lowCount + exemptCount) + '</div><div class="stat-label">Low / Exempt</div></div>';
+            html += '</div>';
+
+            // Charts
+            html += '<div class="dashboard-charts">';
+            html += '<div class="chart-card"><h3>Issues by Type</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-type"></canvas></div></div>';
+            html += '<div class="chart-card"><h3>Issues by Confidence</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-confidence"></canvas></div></div>';
+            html += '</div>';
+
+            // PR Links
+            html += '<div class="dashboard-pr-links"><h3>Opened PRs</h3>';
+            if (data.pr_links.length > 0) {
+                html += '<ul class="pr-link-list">';
+                data.pr_links.forEach(function(pr) {
+                    html += '<li>';
+                    html += '<a href="' + escapeHtml(pr.url) + '" target="_blank">' + escapeHtml(pr.url) + '</a>';
+                    html += '<span class="pr-link-file">' + escapeHtml(pr.file) + '</span>';
+                    html += '</li>';
+                });
+                html += '</ul>';
+            } else {
+                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No PRs have been opened yet. Run Phase 3 (Cleanup) to generate removal PRs.</p>';
+            }
+            html += '</div>';
+
+            // Candidates table
+            html += '<div class="dashboard-candidates"><h3>All Candidates</h3>';
+            html += '<table class="candidates-table">';
+            html += '<thead><tr><th>ID</th><th>Category</th><th>File</th><th>Line</th><th>Confidence</th></tr></thead>';
+            html += '<tbody>';
+            data.candidates.forEach(function(c) {
+                const confClass = c.confidence.toLowerCase();
+                const catClass = c.category.toLowerCase();
+                html += '<tr>';
+                html += '<td style="font-family:monospace;font-size:0.75rem;">' + escapeHtml(c.id.substring(0, 10)) + '</td>';
+                html += '<td><span class="badge badge-' + catClass + '">' + escapeHtml(c.category) + '</span></td>';
+                html += '<td style="font-family:monospace;font-size:0.75rem;">' + escapeHtml(c.file) + '</td>';
+                html += '<td>' + c.line + '</td>';
+                html += '<td><span class="badge badge-' + confClass + '">' + escapeHtml(c.confidence) + '</span></td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+
+            container.innerHTML = html;
+
+            // Render charts
+            renderTypeChart(data.by_type);
+            renderConfidenceChart(data.by_confidence);
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str || '';
+            return div.innerHTML;
+        }
+
+        const TYPE_COLORS = {
+            'feature_flag': '#60a5fa',
+            'dead_code': '#ef4444',
+            'tech_debt': '#eab308',
+            'unused_import': '#a882dc',
+            'boolean_config_variable': '#60a5fa',
+        };
+
+        const CONFIDENCE_COLORS = {
+            'HIGH': '#22c55e',
+            'MEDIUM': '#eab308',
+            'LOW': '#ef4444',
+            'EXEMPT': '#6b7280',
+            'UNKNOWN': '#4b5563',
+        };
+
+        function renderTypeChart(byType) {
+            const canvas = document.getElementById('chart-by-type');
+            if (!canvas) return;
+            if (typeChart) { typeChart.destroy(); }
+
+            const labels = Object.keys(byType);
+            const values = Object.values(byType);
+            const colors = labels.map(function(l) { return TYPE_COLORS[l] || '#6b7280'; });
+
+            typeChart = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: colors,
+                        borderColor: '#1a1d27',
+                        borderWidth: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#8b8fa3', font: { size: 11 }, padding: 12 }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderConfidenceChart(byConfidence) {
+            const canvas = document.getElementById('chart-by-confidence');
+            if (!canvas) return;
+            if (confidenceChart) { confidenceChart.destroy(); }
+
+            const labels = Object.keys(byConfidence);
+            const values = Object.values(byConfidence);
+            const colors = labels.map(function(l) { return CONFIDENCE_COLORS[l] || '#6b7280'; });
+
+            confidenceChart = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: colors,
+                        borderColor: '#1a1d27',
+                        borderWidth: 2,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#8b8fa3', font: { size: 11 }, padding: 12 }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load dashboard data on page load
+        loadDashboardRepoSelect();
+        // Also pre-load CNC repo selector
+        loadRepoSelector('cnc-repo-select', {emptyLabel: 'All repositories'});
     </script>
 </body>
 </html>
