@@ -275,20 +275,34 @@ _GH_PR_URL_RE = re.compile(
 )
 
 
+def _load_github_token() -> str | None:
+    """Load ``GITHUB_TOKEN`` from secrets.txt (if available)."""
+    secrets = _load_secrets(Path(PROJECT_ROOT) / "secrets.txt")
+    return secrets.get("GITHUB_TOKEN")
+
+
 def _check_pr_merged(pr_url: str) -> bool:
     """Return ``True`` if the GitHub PR at *pr_url* has been merged.
 
-    Uses the GitHub REST API (unauthenticated).  Returns ``False`` on any
-    error (network, auth, non-GitHub URL, etc.) so the PR stays in the
-    "opened" bucket by default.
+    Uses the GitHub REST API.  When a ``GITHUB_TOKEN`` is present in
+    ``secrets.txt`` it is sent as a Bearer token (5 000 req/h).  Without
+    a token the request is unauthenticated (60 req/h) and may silently
+    fail due to rate-limiting.
+
+    Returns ``False`` on any error (network, auth, non-GitHub URL, etc.)
+    so the PR stays in the "opened" bucket by default.
     """
     m = _GH_PR_URL_RE.match(pr_url)
     if not m:
         return False
     owner, repo, number = m.group("owner"), m.group("repo"), m.group("number")
     api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}"
+    headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
+    token = _load_github_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     try:
-        resp = _requests.get(api_url, timeout=5, headers={"Accept": "application/vnd.github.v3+json"})
+        resp = _requests.get(api_url, timeout=5, headers=headers)
         if resp.status_code == 200:
             return resp.json().get("merged", False)
     except Exception:
