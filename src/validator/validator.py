@@ -903,12 +903,12 @@ _LAYER_JSON_EXAMPLES: dict[int, tuple[str, str]] = {
     5: (
         "layer_5_issue_archaeology",
         '"layer_5_issue_archaeology": {{\n'
-        '          "issues": [],\n'
-        '          "pr_comments": [],\n'
-        '          "commit_messages": [],\n'
+        '          "related_issues": [],\n'
+        '          "pr_comments_mentioning": [],\n'
+        '          "commit_messages_mentioning": [],\n'
         '          "inline_annotations": [],\n'
         '          "code_owner": "",\n'
-        '          "sentiment": "no_discussion"\n'
+        '          "overall_sentiment": "no_discussion"\n'
         '        }}',
     ),
     6: (

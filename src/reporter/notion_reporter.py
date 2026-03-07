@@ -179,11 +179,19 @@ def _layer_supports_removal(
     if not layer_data:
         return False
 
-    # If the specific field is absent, we can't make a determination.
+    # If the specific field is absent, try the legacy short key for
+    # Layer 5 (old results used ``"sentiment"`` instead of
+    # ``"overall_sentiment"``).  For all other layers, give up.
     if field_key not in layer_data:
-        return False
-
-    value = layer_data[field_key]
+        if (
+            layer_key == "layer_5_issue_archaeology"
+            and "sentiment" in layer_data
+        ):
+            value = layer_data["sentiment"]
+        else:
+            return False
+    else:
+        value = layer_data[field_key]
 
     # Layers where True means "supports removal"
     if layer_key in ("layer_1_reconfirm", "layer_2_git_staleness"):
