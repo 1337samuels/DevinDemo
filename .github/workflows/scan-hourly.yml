@@ -1,0 +1,88 @@
+name: DevinDemo Pipeline Scan (Hourly Testing)
+
+on:
+  schedule:
+    # Every hour (for testing)
+    - cron: '0 * * * *'
+
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Target repository to scan (e.g. owner/repo)'
+        required: true
+        type: string
+      phases:
+        description: 'Comma-separated phases to run: scan,validate,cleanup,report'
+        required: false
+        default: 'scan'
+        type: string
+      scan_input:
+        description: 'Path to existing scan results (for validate/cleanup/report phases)'
+        required: false
+        type: string
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine target repo
+        id: repo
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            REPO="${{ vars.DEFAULT_SCAN_REPO }}"
+            if [ -z "$REPO" ]; then
+              echo "::error::DEFAULT_SCAN_REPO repository variable is not set. Configure it in Settings > Secrets and variables > Actions > Variables."
+              exit 1
+            fi
+          else
+            REPO="${{ inputs.repo }}"
+          fi
+          echo "target=$REPO" >> "$GITHUB_OUTPUT"
+
+      - name: Determine phases
+        id: phases
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            PHASES="scan"
+          else
+            PHASES="${{ inputs.phases }}"
+          fi
+          echo "list=$PHASES" >> "$GITHUB_OUTPUT"
+
+      - name: Run pipeline
+        env:
+          DEVIN_API_KEY_V3: ${{ secrets.DEVIN_API_KEY_V3 }}
+          DEVIN_API_KEY_V1: ${{ secrets.DEVIN_API_KEY_V1 }}
+          DEVIN_ORG_ID: ${{ secrets.DEVIN_ORG_ID }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          chmod +x scripts/run_pipeline.sh
+          ./scripts/run_pipeline.sh \
+            --repo "${{ steps.repo.outputs.target }}" \
+            --phases "${{ steps.phases.outputs.list }}" \
+            ${{ inputs.scan_input && format('--scan-input "{0}"', inputs.scan_input) || '' }}
+
+      - name: Upload results artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-results-${{ github.run_id }}
+          path: results/
+          if-no-files-found: ignore
+          retention-days: 7
