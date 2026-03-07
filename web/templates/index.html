@@ -915,6 +915,11 @@
                 </div>
             </div>
 
+            <div style="margin:1rem 0;display:flex;gap:0.5rem;align-items:center;">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-run-all" onclick="runAll()">Run All Phases</button>
+                <button type="button" class="btn btn-danger btn-sm" id="btn-stop-all" onclick="stopAll()" style="display:none;">Stop</button>
+            </div>
+
             <!-- Pipeline progress indicator -->
             <div class="pipeline-progress" id="pipeline-progress" style="display:none;">
                 <div class="pipeline-step" id="pipeline-step-0">Phase 1: Scan</div>
@@ -1624,6 +1629,10 @@
                 currentStep.className = 'pipeline-step active';
             }
         });
+
+        function stopAll() {
+            socket.emit('stop_all', {});
+        }
 
         // ----- Run / Stop / Clear per phase -----
 

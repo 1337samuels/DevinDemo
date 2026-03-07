@@ -809,5 +809,21 @@ def handle_stop(data=None):
             )
 
 
+@socketio.on("stop_all")
+def handle_stop_all(data=None):
+    """Stop the run-all pipeline by terminating _current_process."""
+    global _current_process
+    with _process_lock:
+        if _current_process is not None and _current_process.poll() is None:
+            _current_process.terminate()
+            _current_process = None
+            emit("process_done", {
+                "data": "\nPipeline terminated by user.\n",
+                "success": False,
+            })
+        else:
+            emit("console_output", {"data": "No pipeline is currently running.\n"})
+
+
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=True, allow_unsafe_werkzeug=True)
