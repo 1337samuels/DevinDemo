@@ -345,6 +345,75 @@ def api_dashboard_data():
     })
 
 
+@app.route("/api/trend-data")
+def api_trend_data():
+    """Return time-series trend data from all validate results for a repo.
+
+    Query params:
+        repo: required — repo name (e.g. ``owner/repo``).
+
+    Returns a JSON object with ``repo`` and ``data_points`` (sorted oldest-first).
+    Each data point has: timestamp, file, total, high, medium, low, exempt, by_type.
+    """
+    from flask import request as flask_request
+
+    repo = flask_request.args.get("repo", "").strip()
+    if not repo:
+        return jsonify({"error": "repo query parameter is required"}), 400
+
+    validate_files = _discover_result_files("validate", repo_filter=repo)
+
+    data_points: list[dict] = []
+    for vf in validate_files:
+        data = _safe_read_json(vf["path"])
+        if data is None or not isinstance(data, dict):
+            continue
+
+        # Count candidates by confidence and type
+        by_confidence: dict[str, int] = {}
+        by_type: dict[str, int] = {}
+        total = 0
+
+        category_map = {
+            "feature_flags": "feature_flag",
+            "dead_code": "dead_code",
+            "tech_debt": "tech_debt",
+        }
+        for key, cat_label in category_map.items():
+            for item in data.get(key, []):
+                total += 1
+                cat = item.get("category", cat_label)
+                by_type[cat] = by_type.get(cat, 0) + 1
+
+                validation = item.get("validation", {})
+                conf = validation.get("confidence", "UNKNOWN") if validation else "UNKNOWN"
+                by_confidence[conf] = by_confidence.get(conf, 0) + 1
+
+        # Parse timestamp from the datetime string (already in "YYYY-MM-DD HH:MM:SS UTC" format)
+        dt_str = vf["datetime"]
+        # Convert to ISO format for JS consumption
+        iso_ts = dt_str.replace(" UTC", "Z").replace(" ", "T")
+
+        data_points.append({
+            "timestamp": iso_ts,
+            "file": vf["path"],
+            "total": total,
+            "high": by_confidence.get("HIGH", 0),
+            "medium": by_confidence.get("MEDIUM", 0),
+            "low": by_confidence.get("LOW", 0),
+            "exempt": by_confidence.get("EXEMPT", 0),
+            "by_type": by_type,
+        })
+
+    # Sort oldest-first (chronological) for charting
+    data_points.sort(key=lambda d: d["timestamp"])
+
+    return jsonify({
+        "repo": repo,
+        "data_points": data_points,
+    })
+
+
 # Keys/secrets that should be masked in console output
 _SECRET_FLAGS = {
     "--api-key",
