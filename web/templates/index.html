@@ -1984,7 +1984,7 @@
 
         // ===== DASHBOARD =====
 
-        let typeChart = null;
+        let prStatusChart = null;
         let confidenceChart = null;
         let trendChart = null;
 
@@ -2121,7 +2121,7 @@
 
             // Charts
             html += '<div class="dashboard-charts">';
-            html += '<div class="chart-card"><h3>Issues by Type</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-type"></canvas></div></div>';
+            html += '<div class="chart-card"><h3>PR Status</h3><div class="chart-canvas-wrapper"><canvas id="chart-pr-status"></canvas></div></div>';
             html += '<div class="chart-card"><h3>Issues by Confidence</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-confidence"></canvas></div></div>';
             html += '</div>';
 
@@ -2186,7 +2186,7 @@
             container.innerHTML = html;
 
             // Render charts
-            renderTypeChart(data.by_type);
+            renderPRStatusChart(data.pr_links, data.merged_prs || []);
             renderConfidenceChart(data.by_confidence);
         }
 
@@ -2330,35 +2330,74 @@
             'UNKNOWN': '#4b5563',
         };
 
-        function renderTypeChart(byType) {
-            const canvas = document.getElementById('chart-by-type');
+        function renderPRStatusChart(openedPrs, mergedPrs) {
+            const canvas = document.getElementById('chart-pr-status');
             if (!canvas) return;
-            if (typeChart) { typeChart.destroy(); }
+            if (prStatusChart) { prStatusChart.destroy(); }
 
-            const labels = Object.keys(byType);
-            const values = Object.values(byType);
-            const colors = labels.map(function(l) { return TYPE_COLORS[l] || '#6b7280'; });
+            const openCount = openedPrs.length;
+            const mergedCount = mergedPrs.length;
+            const totalPrs = openCount + mergedCount;
 
-            typeChart = new Chart(canvas, {
+            if (totalPrs === 0) {
+                // Show empty state
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#8b8fa3';
+                ctx.font = '13px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No PRs yet', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+
+            prStatusChart = new Chart(canvas, {
                 type: 'doughnut',
                 data: {
-                    labels: labels,
+                    labels: ['Opened', 'Merged'],
                     datasets: [{
-                        data: values,
-                        backgroundColor: colors,
+                        data: [openCount, mergedCount],
+                        backgroundColor: ['#f97316', '#22c55e'],
                         borderColor: '#1a1d27',
                         borderWidth: 2,
                     }]
                 },
                 options: {
                     responsive: true,
+                    cutout: '60%',
                     plugins: {
                         legend: {
                             position: 'bottom',
                             labels: { color: '#8b8fa3', font: { size: 11 }, padding: 12 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const count = context.raw;
+                                    const pct = Math.round((count / totalPrs) * 100);
+                                    return context.label + ': ' + count + ' (' + pct + '%)';
+                                }
+                            }
                         }
                     }
-                }
+                },
+                plugins: [{
+                    id: 'centerText',
+                    afterDraw: function(chart) {
+                        const ctx = chart.ctx;
+                        const width = chart.width;
+                        const height = chart.height;
+                        ctx.save();
+                        ctx.fillStyle = '#e1e4ed';
+                        ctx.font = 'bold 1.5rem sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(totalPrs, width / 2, height / 2 - 8);
+                        ctx.font = '0.7rem sans-serif';
+                        ctx.fillStyle = '#8b8fa3';
+                        ctx.fillText('Total PRs', width / 2, height / 2 + 14);
+                        ctx.restore();
+                    }
+                }]
             });
         }
 
