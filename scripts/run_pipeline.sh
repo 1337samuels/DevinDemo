@@ -14,6 +14,8 @@
 #   NOTION_API_KEY          — Notion integration API token
 #   NOTION_PARENT_PAGE_ID   — Notion page ID for creating databases
 #   SLACK_WEBHOOK_URL       — Slack incoming webhook URL
+#   SLACK_BOT_TOKEN         — Slack bot OAuth token (xoxb-*) for file uploads
+#   SLACK_CHANNEL_ID        — Slack channel ID for file uploads (e.g. C0123456789)
 
 set -euo pipefail
 
@@ -157,6 +159,12 @@ for phase in "${PHASE_LIST[@]}"; do
             fi
             if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
                 REPORT_FLAGS+=(--slack-webhook-url "$SLACK_WEBHOOK_URL")
+            fi
+            if [[ -n "${SLACK_BOT_TOKEN:-}" ]]; then
+                REPORT_FLAGS+=(--slack-bot-token "$SLACK_BOT_TOKEN")
+            fi
+            if [[ -n "${SLACK_CHANNEL_ID:-}" ]]; then
+                REPORT_FLAGS+=(--slack-channel-id "$SLACK_CHANNEL_ID")
             fi
             python "$REPO_ROOT/main.py" report "${REPORT_FLAGS[@]}"
             ;;
