@@ -11,6 +11,7 @@ designated channel.  The message includes:
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any
@@ -146,10 +147,20 @@ def _build_summary_message(
 
 
 class SlackNotifier:
-    """Send Slack report summary via incoming webhooks."""
+    """Send Slack report summary via incoming webhooks.
 
-    def __init__(self, webhook_url: str) -> None:
+    Optionally upload files to a Slack channel using a bot token.
+    """
+
+    def __init__(
+        self,
+        webhook_url: str,
+        bot_token: str | None = None,
+        channel_id: str | None = None,
+    ) -> None:
         self._webhook_url = webhook_url
+        self._bot_token = bot_token
+        self._channel_id = channel_id
 
     def notify_report_complete(
         self,
@@ -194,6 +205,103 @@ class SlackNotifier:
             f"[slack] Sent report summary "
             f"({candidates_processed} candidates, {len(pr_urls)} PRs)"
         )
+
+    def upload_files(
+        self,
+        file_paths: list[str],
+        comment: str = "",
+    ) -> None:
+        """Upload one or more files to the configured Slack channel.
+
+        Requires ``bot_token`` and ``channel_id`` to be set.  If either
+        is missing the call is silently skipped (the webhook-only flow
+        remains fully functional).
+
+        Args:
+            file_paths: Absolute paths to the JSON files to upload.
+            comment: Optional initial comment posted with each file.
+
+        Raises:
+            SlackNotifyError: If the Slack API returns an error.
+        """
+        if not self._bot_token or not self._channel_id:
+            print("[slack] Bot token or channel ID not configured; skipping file uploads.")
+            return
+
+        for fpath in file_paths:
+            if not os.path.isfile(fpath):
+                print(f"[slack] File not found, skipping: {fpath}")
+                continue
+
+            filename = os.path.basename(fpath)
+            with open(fpath, "rb") as fh:
+                file_content = fh.read()
+
+            # Use Slack files.upload API (v1 — widely supported)
+            boundary = "----SlackFileUploadBoundary"
+            body_parts: list[bytes] = []
+
+            # channel field
+            body_parts.append(f"--{boundary}\r\n".encode())
+            body_parts.append(b"Content-Disposition: form-data; name=\"channels\"\r\n\r\n")
+            body_parts.append(f"{self._channel_id}\r\n".encode())
+
+            # filename field
+            body_parts.append(f"--{boundary}\r\n".encode())
+            body_parts.append(b"Content-Disposition: form-data; name=\"filename\"\r\n\r\n")
+            body_parts.append(f"{filename}\r\n".encode())
+
+            # title field
+            body_parts.append(f"--{boundary}\r\n".encode())
+            body_parts.append(b"Content-Disposition: form-data; name=\"title\"\r\n\r\n")
+            body_parts.append(f"{filename}\r\n".encode())
+
+            # initial_comment field
+            if comment:
+                body_parts.append(f"--{boundary}\r\n".encode())
+                body_parts.append(b"Content-Disposition: form-data; name=\"initial_comment\"\r\n\r\n")
+                body_parts.append(f"{comment}\r\n".encode())
+
+            # filetype
+            body_parts.append(f"--{boundary}\r\n".encode())
+            body_parts.append(b"Content-Disposition: form-data; name=\"filetype\"\r\n\r\n")
+            body_parts.append(b"json\r\n")
+
+            # file content
+            body_parts.append(f"--{boundary}\r\n".encode())
+            body_parts.append(
+                f"Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n".encode()
+            )
+            body_parts.append(b"Content-Type: application/json\r\n\r\n")
+            body_parts.append(file_content)
+            body_parts.append(b"\r\n")
+
+            # closing boundary
+            body_parts.append(f"--{boundary}--\r\n".encode())
+
+            data = b"".join(body_parts)
+
+            req = urllib.request.Request(
+                "https://slack.com/api/files.upload",
+                data=data,
+                headers={
+                    "Authorization": f"Bearer {self._bot_token}",
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    result = json.loads(resp.read().decode())
+                    if not result.get("ok"):
+                        err = result.get("error", "unknown")
+                        raise SlackNotifyError(200, f"files.upload failed: {err}")
+                print(f"[slack] Uploaded {filename} to channel {self._channel_id}")
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode() if exc.fp else ""
+                raise SlackNotifyError(exc.code, str(exc.reason), body) from exc
+            except urllib.error.URLError as exc:
+                raise SlackNotifyError(0, str(exc.reason)) from exc
 
     def _send(self, payload: dict[str, Any]) -> None:
         """Post a JSON payload to the Slack webhook URL."""

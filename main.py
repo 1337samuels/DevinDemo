@@ -398,9 +398,16 @@ def cmd_report(args: argparse.Namespace) -> None:
         notion_database_id=args.notion_database_id,
         notion_parent_page_id=args.notion_parent_page_id,
         slack_webhook_url=args.slack_webhook_url,
+        slack_bot_token=args.slack_bot_token,
+        slack_channel_id=args.slack_channel_id,
     )
 
-    result = reporter.report(findings, cleanup_results)
+    result = reporter.report(
+        findings,
+        cleanup_results,
+        validate_file=args.input,
+        cleanup_file=args.cleanup_results,
+    )
 
     if args.output:
         with open(args.output, "w") as fh:
@@ -436,6 +443,8 @@ _SECRETS_MAP: dict[str, tuple[str, set[str]]] = {
     "NOTION_MASTER_PAGE_ID": ("notion_parent_page_id", {"report"}),
     "SLACK_WEBHOOK_URL": ("slack_webhook_url", {"report"}),
     "SLACK_WEBHOOKS_URL": ("slack_webhook_url", {"report"}),
+    "SLACK_BOT_TOKEN": ("slack_bot_token", {"report"}),
+    "SLACK_CHANNEL_ID": ("slack_channel_id", {"report"}),
 }
 
 
@@ -694,6 +703,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--slack-webhook-url",
         default=_get_secret(secrets, "SLACK_WEBHOOK_URL") or _get_secret(secrets, "SLACK_WEBHOOKS_URL"),
         help="Slack incoming webhook URL for report summary notification.",
+    )
+    report_p.add_argument(
+        "--slack-bot-token",
+        default=_get_secret(secrets, "SLACK_BOT_TOKEN"),
+        help="Slack bot OAuth token (xoxb-...) for uploading Phase 2 & 3 JSON files.",
+    )
+    report_p.add_argument(
+        "--slack-channel-id",
+        default=_get_secret(secrets, "SLACK_CHANNEL_ID"),
+        help="Slack channel ID to upload result files to (e.g. C0123456789).",
     )
     report_p.set_defaults(func=cmd_report)
 

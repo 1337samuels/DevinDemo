@@ -975,6 +975,15 @@
                         <label>Slack Webhook URL</label>
                         <input type="text" id="runall-slack-webhook-url" placeholder="https://hooks.slack.com/services/..." />
                     </div>
+                    <div class="form-group">
+                        <label>Slack Bot Token</label>
+                        <input type="password" id="runall-slack-bot-token" placeholder="xoxb-..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Slack Channel ID</label>
+                        <input type="text" id="runall-slack-channel-id" placeholder="C0123456789" />
+                    </div>
+                    <p style="color:var(--text-muted);font-size:0.75rem;margin-top:0.25rem;">Bot token + channel ID are needed to upload Phase 2 &amp; 3 JSON files to Slack.</p>
                 </div>
             </div>
 
@@ -1302,6 +1311,15 @@
                         <label>Slack Webhook URL</label>
                         <input type="text" id="report-slack-webhook-url" placeholder="https://hooks.slack.com/services/..." />
                     </div>
+                    <div class="form-group">
+                        <label>Slack Bot Token</label>
+                        <input type="password" id="report-slack-bot-token" placeholder="xoxb-..." />
+                    </div>
+                    <div class="form-group">
+                        <label>Slack Channel ID</label>
+                        <input type="text" id="report-slack-channel-id" placeholder="C0123456789" />
+                    </div>
+                    <p style="color:var(--text-muted);font-size:0.75rem;margin-top:0.25rem;">Bot token + channel ID are needed to upload Phase 2 &amp; 3 JSON files to Slack.</p>
                 </div>
             </div>
 
@@ -1714,6 +1732,8 @@
                 notion_database_id: getVal('runall-notion-database-id') || null,
                 notion_parent_page_id: getVal('runall-notion-parent-page-id') || null,
                 slack_webhook_url: getVal('runall-slack-webhook-url') || null,
+                slack_bot_token: getVal('runall-slack-bot-token') || null,
+                slack_channel_id: getVal('runall-slack-channel-id') || null,
             };
 
             runAllActive = true;
@@ -1861,6 +1881,8 @@
                     notion_database_id: getVal('report-notion-database-id') || null,
                     notion_parent_page_id: getVal('report-notion-parent-page-id') || null,
                     slack_webhook_url: getVal('report-slack-webhook-url') || null,
+                    slack_bot_token: getVal('report-slack-bot-token') || null,
+                    slack_channel_id: getVal('report-slack-channel-id') || null,
                 };
             }
 

@@ -193,6 +193,8 @@ def api_secrets():
         "ORG_ID": ["scan-org-id", "validate-org-id", "cleanup-org-id", "runall-org-id"],
         "SLACK_WEBHOOK_URL": ["report-slack-webhook-url", "runall-slack-webhook-url"],
         "SLACK_WEBHOOKS_URL": ["report-slack-webhook-url", "runall-slack-webhook-url"],
+        "SLACK_BOT_TOKEN": ["report-slack-bot-token", "runall-slack-bot-token"],
+        "SLACK_CHANNEL_ID": ["report-slack-channel-id", "runall-slack-channel-id"],
         "NOTION_SECRET": ["report-notion-api-key", "runall-notion-api-key"],
         "NOTION_MASTER_PAGE_ID": ["report-notion-parent-page-id", "runall-notion-parent-page-id"],
     }
@@ -488,6 +490,7 @@ _SECRET_FLAGS = {
     "--v1-api-key",
     "--notion-api-key",
     "--slack-webhook-url",
+    "--slack-bot-token",
 }
 
 
@@ -698,6 +701,10 @@ def handle_run_phase(data):
             cmd.extend(["--notion-parent-page-id", args["notion_parent_page_id"]])
         if args.get("slack_webhook_url"):
             cmd.extend(["--slack-webhook-url", args["slack_webhook_url"]])
+        if args.get("slack_bot_token"):
+            cmd.extend(["--slack-bot-token", args["slack_bot_token"]])
+        if args.get("slack_channel_id"):
+            cmd.extend(["--slack-channel-id", args["slack_channel_id"]])
 
     else:
         emit("error", {"data": f"Unknown phase: {phase}\n"})
@@ -819,6 +826,8 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
     notion_database_id = args.get("notion_database_id") or None
     notion_parent_page_id = args.get("notion_parent_page_id") or None
     slack_webhook_url = args.get("slack_webhook_url") or None
+    slack_bot_token = args.get("slack_bot_token") or None
+    slack_channel_id = args.get("slack_channel_id") or None
 
     phase_ids = ["scan", "validate", "cleanup", "report"]
 
@@ -920,6 +929,10 @@ def _run_all_pipeline(args: dict, sid: str) -> None:
             cmd_report.extend(["--notion-parent-page-id", notion_parent_page_id])
         if slack_webhook_url:
             cmd_report.extend(["--slack-webhook-url", slack_webhook_url])
+        if slack_bot_token:
+            cmd_report.extend(["--slack-bot-token", slack_bot_token])
+        if slack_channel_id:
+            cmd_report.extend(["--slack-channel-id", slack_channel_id])
 
         rc = _run_phase_subprocess(cmd_report, sid, phase="report")
         if rc != 0:
