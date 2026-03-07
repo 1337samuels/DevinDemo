@@ -557,6 +557,7 @@ class FeatureFlagScanner:
             # The on_update callback fetches V1 messages to count
             # [SCANNED] markers for real per-file progress.
             batch_start = time.monotonic()
+            _poll_count = 0
 
             def _batch_status(
                 sess: dict[str, Any],
@@ -568,6 +569,8 @@ class FeatureFlagScanner:
                 _bfiles: list[str] = batch_files,
                 _sid: str = session_id,
             ) -> None:
+                nonlocal _poll_count
+                _poll_count += 1
                 elapsed = time.monotonic() - _bstart
                 status = sess.get("status", "")
                 detail = sess.get("status_detail", "")
@@ -580,9 +583,13 @@ class FeatureFlagScanner:
                 # We still check every poll so the count updates as
                 # soon as the response is finalised.
                 batch_scanned = 0
+                latest_msg = ""
                 try:
                     v1 = self._client.get_session_v1(_sid)
                     batch_scanned = self._count_scanned_files(v1, _bfiles)
+                    # Every 2nd poll, also grab the latest Devin message
+                    if _poll_count % 2 == 0:
+                        latest_msg = self._last_devin_message(v1)
                 except Exception:
                     pass  # Non-critical; fall back to 0
 
@@ -594,6 +601,14 @@ class FeatureFlagScanner:
                     f"  | Batch {_bidx}/{_btot}"
                     f"  | Files: {cur_files}/{_ftot} ({pct}%)"
                 )
+
+                # Print latest Devin message snippet every 2nd poll
+                if latest_msg:
+                    # Truncate to first 200 chars for readability
+                    snippet = latest_msg[:200].replace("\n", " ").strip()
+                    if len(latest_msg) > 200:
+                        snippet += " ..."
+                    print(f"    └─ Devin: {snippet}")
 
             self._client.poll_session(
                 session_id,
