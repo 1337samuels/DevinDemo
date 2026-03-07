@@ -15,7 +15,7 @@ has four stages:
 
 | Stage | Status | Description |
 |-------|--------|-------------|
-| **1. Identify** | Implemented | Quick scan — flag potential feature flags, dead code, and tech debt (low bar, fast) |
+| **1. Identify** | Implemented | Smart scan — flag potential feature flags (with staleness signals), dead code (strong unused signals only), actionable tech debt |
 | **2. Validate** | Stub | Deep-dive verification of each finding from Part 1 (slow, thorough) |
 | **3. Cleanup**  | Stub | Generate PRs that remove dead code and simplify branches |
 | **4. Report**   | Stub | Publish summaries to Notion, Slack, or GitHub Issues |
@@ -292,26 +292,41 @@ These are documented so that contributors and users know the current scope.
   - Boolean configuration variables used in `if`/`else` branches
   - Functions whose purpose is to check whether a feature is enabled
   - Constants or settings that act as on/off switches
+- **Staleness signals** are prioritized in Phase 1: hardcoded constants with no
+  dynamic override, always-true/false branches, and flag names referencing old
+  versions or dates (e.g. `ENABLE_V2_MIGRATION`, `USE_NEW_AUTH_2023`).
 - This means some flags may be missed if they use unconventional patterns, and
   some false positives are expected.  Part 2 (validation) will reduce noise.
 
 ### Dead code detection
 - Unreachable branches (`if False:`, `if 0:`, always-true guards)
-- Unused functions/classes (defined but never called)
-- Unused imports
-- Large blocks of commented-out code (≥3 lines)
+- Functions/classes with **strong unused signals**: private (prefixed with `_`)
+  and never referenced in the same file, or in modules never imported. Framework
+  handlers, CLI commands, and test fixtures are intentionally skipped — Phase 2
+  performs full reachability analysis.
+- Unused imports are **deprioritized** — only flagged when the import is from a
+  non-existent or deprecated module. Routine unused imports are better handled
+  by linters.
+- Large blocks of commented-out code (≥3 lines of former source code, not docs)
 
 ### Tech debt detection
-- `TODO` / `FIXME` / `HACK` / `XXX` comments
-- Deprecated stdlib or third-party API usage
-- Python version compatibility shims (`sys.version` checks, `six` usage)
+- `TODO` / `FIXME` / `HACK` / `XXX` comments — **prioritises actionable items**
+  with staleness signals: ticket references, past version numbers, dates, or
+  phrases like "remove after" / "temporary workaround". Generic TODOs with no
+  actionable context are skipped.
+- Deprecated stdlib or third-party API usage (e.g. `optparse`, `imp`)
+- Python version compatibility shims (`sys.version` checks, `six` usage,
+  `try/except` import patterns for merged stdlib modules)
 
 ### Devin API
 - All four stages use the **Devin v3 API** with service user credentials.
-- **Part 1** (identify): quick Devin session scan — low bar for flagging,
-  fast, may include false positives.
-- **Part 2** (validate): deep-dive Devin sessions that verify each finding
-  from Part 1 individually — slower, thorough, reduces false positives.
+- **Part 1** (identify): smart Devin session scan — uses staleness signals and
+  strong unused indicators to flag candidates quickly. May include false
+  positives, which Phase 2 filters out.
+- **Part 2** (validate): deep-dive Devin sessions with **category-aware** Layer 1
+  validation. Commented-out code is verified as former source (not docs),
+  tech debt markers are checked for actionability, and feature flags are
+  confirmed as actual flag patterns. 8 layers total, slower but thorough.
 - **Part 3** (cleanup): Devin sessions that generate cleanup PRs.
 - **Part 4** (report): Devin sessions that publish summaries.
 - The `org_id` **must be provided explicitly** in the URL path — despite the

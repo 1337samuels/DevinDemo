@@ -649,13 +649,13 @@
 
     <!-- ===== PHASE 1: SCAN ===== -->
     <section class="section">
-        <h2 class="section-title">Phase 1: Scan &mdash; Candidate Detection</h2>
+        <h2 class="section-title">Phase 1: Scan &mdash; Smart Candidate Detection</h2>
         <div class="layers-grid">
             <div class="layer-card">
                 <span class="layer-icon">&#9881;</span>
-                <div class="layer-name">Feature Flags</div>
-                <div class="layer-num-badge">env vars &amp; config gates</div>
-                <div class="tooltip">Environment variable checks that gate behaviour, boolean config switches, and functions whose purpose is to check if a feature is enabled.</div>
+                <div class="layer-name">Feature Flags + Staleness</div>
+                <div class="layer-num-badge">env vars, config gates &amp; stale flags</div>
+                <div class="tooltip">Detects env var checks, boolean configs, and gate functions. Prioritizes <strong>stale flags</strong>: hardcoded constants with no dynamic override, always-true branches, and names referencing old versions/dates.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128683;</span>
@@ -666,32 +666,32 @@
             <div class="layer-card">
                 <span class="layer-icon">&#128465;</span>
                 <div class="layer-name">Unused Definitions</div>
-                <div class="layer-num-badge">functions, classes &amp; imports</div>
-                <div class="tooltip">Functions or classes defined but never called or imported elsewhere, and unused import statements.</div>
+                <div class="layer-num-badge">strong signals only</div>
+                <div class="tooltip">Functions/classes with <strong>strong unused signals</strong>: private (prefixed with <code>_</code>) and never referenced, or in modules never imported. Avoids flagging framework handlers, CLI commands, and test fixtures &mdash; Phase 2 handles full reachability.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128221;</span>
                 <div class="layer-name">Commented-Out Code</div>
                 <div class="layer-num-badge">&ge;3 lines of former source</div>
-                <div class="tooltip">Large blocks of commented-out code (3+ consecutive lines) that look like former source code, not documentation comments.</div>
+                <div class="tooltip">Large blocks of commented-out code (3+ consecutive lines) that look like former source code. Phase 2 verifies these are actual dead code, not documentation or examples.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128296;</span>
-                <div class="layer-name">Tech Debt Markers</div>
-                <div class="layer-num-badge">TODO / FIXME / HACK</div>
-                <div class="tooltip">TODO, FIXME, HACK, and XXX comments that indicate known technical debt or incomplete work.</div>
+                <div class="layer-name">Tech Debt (Actionable)</div>
+                <div class="layer-num-badge">stale TODOs &amp; dated markers</div>
+                <div class="tooltip">Prioritizes TODOs with <strong>staleness signals</strong>: ticket references, past version numbers, dates, or phrases like &ldquo;remove after&rdquo; / &ldquo;temporary workaround.&rdquo; Skips generic TODOs with no actionable context.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#9888;</span>
                 <div class="layer-name">Deprecated APIs</div>
                 <div class="layer-num-badge">stdlib &amp; third-party</div>
-                <div class="tooltip">Usage of deprecated standard library or third-party APIs that should be replaced with modern alternatives.</div>
+                <div class="tooltip">Usage of deprecated standard library or third-party APIs (e.g. optparse, imp) that should be replaced with modern alternatives.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#128260;</span>
                 <div class="layer-name">Compat Shims</div>
                 <div class="layer-num-badge">old Python versions</div>
-                <div class="tooltip">Compatibility shims for old Python versions, sys.version checks, six library usage, and other legacy compatibility code.</div>
+                <div class="tooltip">Compatibility shims for old Python versions, sys.version checks, six library usage, and try/except import patterns for merged stdlib modules.</div>
             </div>
         </div>
     </section>
@@ -702,9 +702,9 @@
         <div class="layers-grid">
             <div class="layer-card">
                 <span class="layer-icon">&#128270;</span>
-                <div class="layer-name">Re-Confirm Detection</div>
+                <div class="layer-name">Re-Confirm (Category-Aware)</div>
                 <div class="layer-num-badge">Layer 1</div>
-                <div class="tooltip">Verify the detection is real code (not a comment, string, or docstring). Cross-check with additional file references.</div>
+                <div class="tooltip"><strong>Category-aware validation:</strong> Feature flags &rarr; verify actual flag pattern, not just a matching name. Commented-out code &rarr; confirm it's former source code (not docs/examples). Tech debt &rarr; confirm the marker still exists and is actionable. Only EXEMPTs truly invalid detections.</div>
             </div>
             <div class="layer-card">
                 <span class="layer-icon">&#9200;</span>
