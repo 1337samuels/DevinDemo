@@ -626,6 +626,41 @@
             color: var(--text);
         }
 
+        .trend-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .trend-section h3 {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        .trend-canvas-wrapper {
+            position: relative;
+            width: 100%;
+            height: 280px;
+        }
+
+        .stat-delta {
+            display: inline-block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.375rem;
+            vertical-align: middle;
+        }
+
+        .stat-delta.positive { color: var(--green); }
+        .stat-delta.negative { color: var(--red); }
+        .stat-delta.neutral { color: var(--text-muted); }
+
         .dashboard-candidates {
             background: var(--surface);
             border: 1px solid var(--border);
@@ -1871,6 +1906,7 @@
 
         let typeChart = null;
         let confidenceChart = null;
+        let trendChart = null;
 
         async function loadDashboardRepoSelect() {
             await loadRepoSelector('dashboard-repo-select', {emptyLabel: 'Select a repository\u2026'});
@@ -1958,6 +1994,21 @@
                 }
                 const data = await resp.json();
                 renderDashboard(data);
+
+                // Fetch trend data for delta indicators and trend chart
+                const repoName = data.repo;
+                if (repoName && repoName !== 'unknown') {
+                    try {
+                        const trendResp = await fetch('/api/trend-data?repo=' + encodeURIComponent(repoName));
+                        if (trendResp.ok) {
+                            const trendData = await trendResp.json();
+                            renderTrendDeltas(trendData, data);
+                            renderTrendChart(trendData);
+                        }
+                    } catch (e) {
+                        // Trend data is optional — silently ignore errors
+                    }
+                }
             } catch (err) {
                 container.innerHTML = '<div class="dashboard-empty"><h3>Error</h3><p>' + err.message + '</p></div>';
             }
@@ -1994,7 +2045,7 @@
             html += '<div class="chart-card"><h3>Issues by Confidence</h3><div class="chart-canvas-wrapper"><canvas id="chart-by-confidence"></canvas></div></div>';
             html += '</div>';
 
-            // PR Links
+            // Opened PR Links
             html += '<div class="dashboard-pr-links"><h3>Opened PRs</h3>';
             if (data.pr_links.length > 0) {
                 html += '<ul class="pr-link-list">';
@@ -2006,7 +2057,25 @@
                 });
                 html += '</ul>';
             } else {
-                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No PRs have been opened yet. Run Phase 3 (Cleanup) to generate removal PRs.</p>';
+                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No open PRs. Either none have been created yet, or all have been merged.</p>';
+            }
+            html += '</div>';
+
+            // Merged PR Links
+            var mergedPrs = data.merged_prs || [];
+            html += '<div class="dashboard-pr-links"><h3>Merged PRs</h3>';
+            if (mergedPrs.length > 0) {
+                html += '<ul class="pr-link-list">';
+                mergedPrs.forEach(function(pr) {
+                    html += '<li>';
+                    html += '<a href="' + escapeHtml(pr.url) + '" target="_blank">' + escapeHtml(pr.url) + '</a>';
+                    html += '<span class="pr-link-file">' + escapeHtml(pr.file) + '</span>';
+                    html += '<span class="badge badge-high" style="margin-left:0.5rem;font-size:0.625rem;">MERGED</span>';
+                    html += '</li>';
+                });
+                html += '</ul>';
+            } else {
+                html += '<p style="color:var(--text-muted);font-size:0.875rem;">No merged PRs yet.</p>';
             }
             html += '</div>';
 
@@ -2028,11 +2097,135 @@
             });
             html += '</tbody></table></div>';
 
+            // Trend chart placeholder (filled by renderTrendChart after trend data loads)
+            html += '<div class="trend-section" id="trend-section" style="display:none;">';
+            html += '<h3>Trends Over Time</h3>';
+            html += '<div class="trend-canvas-wrapper"><canvas id="chart-trend"></canvas></div>';
+            html += '</div>';
+
             container.innerHTML = html;
 
             // Render charts
             renderTypeChart(data.by_type);
             renderConfidenceChart(data.by_confidence);
+        }
+
+        function renderTrendDeltas(trendData, currentData) {
+            if (!trendData.data_points || trendData.data_points.length < 2) return;
+
+            // The current file is the most recent data point; the previous is the one before it
+            const points = trendData.data_points;
+            const prev = points[points.length - 2];
+
+            const currentTotal = currentData.total_candidates;
+            const currentHigh = currentData.by_confidence['HIGH'] || 0;
+            const currentMed = currentData.by_confidence['MEDIUM'] || 0;
+            const currentLow = (currentData.by_confidence['LOW'] || 0) + (currentData.by_confidence['EXEMPT'] || 0);
+
+            const deltas = [
+                { current: currentTotal, previous: prev.total, invert: true },
+                { current: currentHigh, previous: prev.high, invert: false },
+                { current: currentMed, previous: prev.medium, invert: true },
+                { current: currentLow, previous: prev.low + prev.exempt, invert: true },
+            ];
+
+            const statCards = document.querySelectorAll('#dashboard-content .stat-card');
+            deltas.forEach(function(d, i) {
+                if (i >= statCards.length) return;
+                const diff = d.current - d.previous;
+                if (diff === 0) return;
+                const arrow = diff > 0 ? '\u2191' : '\u2193';
+                // For total/medium/low: decrease is good (green). For high: increase means more confirmed dead code found.
+                let cls = 'neutral';
+                if (d.invert) {
+                    cls = diff < 0 ? 'positive' : 'negative';
+                } else {
+                    cls = diff > 0 ? 'positive' : 'negative';
+                }
+                const deltaEl = document.createElement('span');
+                deltaEl.className = 'stat-delta ' + cls;
+                deltaEl.textContent = arrow + Math.abs(diff);
+                statCards[i].querySelector('.stat-value').appendChild(deltaEl);
+            });
+        }
+
+        function renderTrendChart(trendData) {
+            if (!trendData.data_points || trendData.data_points.length < 2) return;
+
+            const section = document.getElementById('trend-section');
+            if (section) section.style.display = '';
+
+            const canvas = document.getElementById('chart-trend');
+            if (!canvas) return;
+            if (trendChart) { trendChart.destroy(); }
+
+            const points = trendData.data_points;
+            const labels = points.map(function(p) {
+                return p.timestamp.replace('T', ' ').replace('Z', '').substring(0, 16);
+            });
+
+            trendChart = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Total',
+                            data: points.map(function(p) { return p.total; }),
+                            borderColor: '#6366f1',
+                            backgroundColor: 'rgba(99,102,241,0.1)',
+                            fill: true,
+                            tension: 0.3,
+                        },
+                        {
+                            label: 'High',
+                            data: points.map(function(p) { return p.high; }),
+                            borderColor: '#22c55e',
+                            backgroundColor: 'transparent',
+                            tension: 0.3,
+                        },
+                        {
+                            label: 'Medium',
+                            data: points.map(function(p) { return p.medium; }),
+                            borderColor: '#eab308',
+                            backgroundColor: 'transparent',
+                            tension: 0.3,
+                        },
+                        {
+                            label: 'Low',
+                            data: points.map(function(p) { return p.low; }),
+                            borderColor: '#ef4444',
+                            backgroundColor: 'transparent',
+                            tension: 0.3,
+                        },
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#8b8fa3', font: { size: 10 }, maxRotation: 45 },
+                            grid: { color: 'rgba(42,46,62,0.5)' },
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#8b8fa3', font: { size: 11 }, stepSize: 1 },
+                            grid: { color: 'rgba(42,46,62,0.5)' },
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#8b8fa3', font: { size: 11 }, padding: 12 }
+                        }
+                    }
+                }
+            });
         }
 
         function escapeHtml(str) {

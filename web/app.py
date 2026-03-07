@@ -10,6 +10,7 @@ import sys
 import threading
 from pathlib import Path
 
+import requests as _requests
 from flask import Flask, jsonify, render_template
 from flask_socketio import SocketIO, emit
 
@@ -253,6 +254,33 @@ def _safe_read_json(file_path: str) -> dict | list | None:
         return None
 
 
+# Regex to extract owner, repo, and PR number from a GitHub PR URL.
+_GH_PR_URL_RE = re.compile(
+    r"https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
+)
+
+
+def _check_pr_merged(pr_url: str) -> bool:
+    """Return ``True`` if the GitHub PR at *pr_url* has been merged.
+
+    Uses the GitHub REST API (unauthenticated).  Returns ``False`` on any
+    error (network, auth, non-GitHub URL, etc.) so the PR stays in the
+    "opened" bucket by default.
+    """
+    m = _GH_PR_URL_RE.match(pr_url)
+    if not m:
+        return False
+    owner, repo, number = m.group("owner"), m.group("repo"), m.group("number")
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}"
+    try:
+        resp = _requests.get(api_url, timeout=5, headers={"Accept": "application/vnd.github.v3+json"})
+        if resp.status_code == 200:
+            return resp.json().get("merged", False)
+    except Exception:
+        pass
+    return False
+
+
 @app.route("/api/dashboard-data")
 def api_dashboard_data():
     """Return aggregated dashboard data from validate and cleanup results.
@@ -310,7 +338,7 @@ def api_dashboard_data():
             candidates.append(entry)
 
     # --- Load PR links from cleanup results for the same repo ---
-    pr_links: list[dict] = []
+    all_pr_links: list[dict] = []
     repo_name = data.get("repo", "unknown")
     cleanup_files = _discover_result_files("cleanup", repo_filter=repo_name)
     for cf in cleanup_files:
@@ -321,7 +349,7 @@ def api_dashboard_data():
         items = cleanup_data if isinstance(cleanup_data, list) else []
         for item in items:
             if item.get("status") == "pr_opened" and item.get("pr_url", "").startswith("http"):
-                pr_links.append({
+                all_pr_links.append({
                     "candidate_id": item.get("candidate_id", ""),
                     "file": item.get("file", ""),
                     "url": item["pr_url"],
@@ -331,13 +359,23 @@ def api_dashboard_data():
     for c in candidates:
         if c.get("pr_url") and c["pr_url"].startswith("http"):
             # Avoid duplicates (same URL)
-            existing_urls = {pl["url"] for pl in pr_links}
+            existing_urls = {pl["url"] for pl in all_pr_links}
             if c["pr_url"] not in existing_urls:
-                pr_links.append({
+                all_pr_links.append({
                     "candidate_id": c["id"],
                     "file": c["file"],
                     "url": c["pr_url"],
                 })
+
+    # --- Check merge status of PRs via GitHub API ---
+    opened_prs: list[dict] = []
+    merged_prs: list[dict] = []
+    for pr in all_pr_links:
+        merged = _check_pr_merged(pr["url"])
+        if merged:
+            merged_prs.append(pr)
+        else:
+            opened_prs.append(pr)
 
     # --- Build aggregations ---
     by_type: dict[str, int] = {}
@@ -356,8 +394,78 @@ def api_dashboard_data():
         "total_candidates": len(candidates),
         "by_type": by_type,
         "by_confidence": by_confidence,
-        "pr_links": pr_links,
+        "pr_links": opened_prs,
+        "merged_prs": merged_prs,
         "candidates": candidates,
+    })
+
+
+@app.route("/api/trend-data")
+def api_trend_data():
+    """Return time-series trend data from all validate results for a repo.
+
+    Query params:
+        repo: required — repo name (e.g. ``owner/repo``).
+
+    Returns a JSON object with ``repo`` and ``data_points`` (sorted oldest-first).
+    Each data point has: timestamp, file, total, high, medium, low, exempt, by_type.
+    """
+    from flask import request as flask_request
+
+    repo = flask_request.args.get("repo", "").strip()
+    if not repo:
+        return jsonify({"error": "repo query parameter is required"}), 400
+
+    validate_files = _discover_result_files("validate", repo_filter=repo)
+
+    data_points: list[dict] = []
+    for vf in validate_files:
+        data = _safe_read_json(vf["path"])
+        if data is None or not isinstance(data, dict):
+            continue
+
+        # Count candidates by confidence and type
+        by_confidence: dict[str, int] = {}
+        by_type: dict[str, int] = {}
+        total = 0
+
+        category_map = {
+            "feature_flags": "feature_flag",
+            "dead_code": "dead_code",
+            "tech_debt": "tech_debt",
+        }
+        for key, cat_label in category_map.items():
+            for item in data.get(key, []):
+                total += 1
+                cat = item.get("category", cat_label)
+                by_type[cat] = by_type.get(cat, 0) + 1
+
+                validation = item.get("validation", {})
+                conf = validation.get("confidence", "UNKNOWN") if validation else "UNKNOWN"
+                by_confidence[conf] = by_confidence.get(conf, 0) + 1
+
+        # Parse timestamp from the datetime string (already in "YYYY-MM-DD HH:MM:SS UTC" format)
+        dt_str = vf["datetime"]
+        # Convert to ISO format for JS consumption
+        iso_ts = dt_str.replace(" UTC", "Z").replace(" ", "T")
+
+        data_points.append({
+            "timestamp": iso_ts,
+            "file": vf["path"],
+            "total": total,
+            "high": by_confidence.get("HIGH", 0),
+            "medium": by_confidence.get("MEDIUM", 0),
+            "low": by_confidence.get("LOW", 0),
+            "exempt": by_confidence.get("EXEMPT", 0),
+            "by_type": by_type,
+        })
+
+    # Sort oldest-first (chronological) for charting
+    data_points.sort(key=lambda d: d["timestamp"])
+
+    return jsonify({
+        "repo": repo,
+        "data_points": data_points,
     })
 
 
