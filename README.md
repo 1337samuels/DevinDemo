@@ -15,7 +15,7 @@ has four stages:
 
 | Stage | Status | Description |
 |-------|--------|-------------|
-| **1. Identify** | Implemented | Smart scan — flag potential feature flags (with staleness signals), dead code (strong unused signals only), actionable tech debt |
+| **1. Identify** | Implemented | Fast scan — flag potential feature flags (with staleness signals), dead code (strong unused signals only), actionable tech debt |
 | **2. Validate** | Stub | Deep-dive verification of each finding from Part 1 (slow, thorough) |
 | **3. Cleanup**  | Stub | Generate PRs that remove dead code and simplify branches |
 | **4. Report**   | Stub | Publish summaries to Notion, Slack, or GitHub Issues |
