@@ -379,6 +379,103 @@ def create_notion_database(
 
 
 # ---------------------------------------------------------------------------
+# "Opened PRs" companion database
+# ---------------------------------------------------------------------------
+
+# Property definitions for the lightweight PR-only database.
+_PR_VIEW_PROPERTIES: dict[str, dict[str, Any]] = {
+    "Candidate ID": {"title": {}},
+    "File": {"rich_text": {}},
+    "PR URL": {"url": {}},
+    "Summary": {"rich_text": {}},
+}
+
+
+def _build_pr_view_title(repo: str | None) -> str:
+    """Build a title for the Opened PRs companion database."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    if repo:
+        return f"Opened PRs \u2014 {repo} \u2014 {ts}"
+    return f"Opened PRs \u2014 {ts}"
+
+
+def _create_pr_view_database(
+    api_key: str,
+    parent_page_id: str,
+    repo: str | None = None,
+) -> str:
+    """Create a companion database showing only candidates with opened PRs.
+
+    The database has a reduced set of columns:
+    Candidate ID, File, PR URL, Summary.
+
+    Returns:
+        The database ID of the newly created database.
+    """
+    title = _build_pr_view_title(repo)
+    payload: dict[str, Any] = {
+        "parent": {"type": "page_id", "page_id": parent_page_id},
+        "title": [{"type": "text", "text": {"content": title}}],
+        "properties": _PR_VIEW_PROPERTIES,
+    }
+    result = _notion_request("POST", "/databases", api_key, payload)
+    db_id = result["id"]
+    print(f"[notion] Created Opened PRs database: {db_id}")
+    return db_id
+
+
+def _build_pr_view_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Build Notion page properties for a single PR-view row."""
+    props: dict[str, Any] = {
+        "Candidate ID": {
+            "title": [{"text": {"content": row["candidate_id"]}}],
+        },
+        "File": {
+            "rich_text": [{"text": {"content": _truncate_text(row["file"])}}],
+        },
+        "Summary": {
+            "rich_text": [
+                {"text": {"content": _truncate_text(row["summary"])}}
+            ],
+        },
+    }
+    if row["pr_url"]:
+        props["PR URL"] = {"url": row["pr_url"]}
+    else:
+        props["PR URL"] = {"url": None}
+    return props
+
+
+def _publish_pr_view(
+    api_key: str,
+    parent_page_id: str,
+    rows: list[dict[str, Any]],
+    repo: str | None = None,
+) -> str | None:
+    """Create and populate the Opened PRs companion database.
+
+    Only rows where ``pr_opened`` is truthy are included.  If no rows
+    have PRs, the database is not created at all.
+
+    Returns:
+        The database ID if created, or ``None`` if skipped.
+    """
+    pr_rows = [r for r in rows if r["pr_opened"]]
+    if not pr_rows:
+        print("[notion] No candidates have opened PRs; skipping PR view.")
+        return None
+
+    db_id = _create_pr_view_database(api_key, parent_page_id, repo=repo)
+
+    for row in pr_rows:
+        props = _build_pr_view_row(row)
+        _create_page(api_key, db_id, props)
+
+    print(f"[notion] Opened PRs view: {len(pr_rows)} row(s) created.")
+    return db_id
+
+
+# ---------------------------------------------------------------------------
 # Row creation / upsert
 # ---------------------------------------------------------------------------
 
@@ -591,5 +688,19 @@ class NotionReporter:
             f"[notion] Done. Created {created} row(s), "
             f"updated {updated} row(s) in database {self._database_id}."
         )
+
+        # --- Opened PRs companion database ---
+        if self._parent_page_id:
+            try:
+                pr_db_id = _publish_pr_view(
+                    self._api_key,
+                    self._parent_page_id,
+                    rows,
+                    repo=findings.get("repo"),
+                )
+                if pr_db_id:
+                    print(f"[notion] Opened PRs database: {pr_db_id}")
+            except NotionAPIError as exc:
+                print(f"[notion] WARNING: could not create PR view: {exc}")
 
         return self._database_id
