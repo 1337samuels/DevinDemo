@@ -84,43 +84,6 @@ class ProgressTracker:
         )
 
 
-class ValidationProgressTracker:
-    """Stateful callback for validation session polling.
-
-    Displays elapsed time, batch index, and session status.
-
-    In the single-session flow there is no incremental
-    ``structured_output`` to inspect, so the tracker simply shows
-    the Devin session status (``working``, ``waiting_for_user``,
-    etc.) alongside the batch label.
-    """
-
-    def __init__(self, batch_idx: int, total_batches: int, batch_size: int) -> None:
-        self._start = time.monotonic()
-        self._batch_idx = batch_idx
-        self._total_batches = total_batches
-        self._batch_size = batch_size
-
-    @staticmethod
-    def _fmt_elapsed(seconds: float) -> str:
-        m, s = divmod(int(seconds), 60)
-        return f"{m}m{s:02d}s" if m else f"{s}s"
-
-    def __call__(self, session: dict) -> None:
-        elapsed = time.monotonic() - self._start
-
-        status = session.get("status", "?")
-        detail = session.get("status_detail", "")
-        status_str = f"{status} ({detail})" if detail else status
-
-        batch_label = f"Batch {self._batch_idx}/{self._total_batches}"
-
-        print(
-            f"  [{self._fmt_elapsed(elapsed)}] {batch_label} | {status_str}"
-            f"  | Candidates: {self._batch_size}"
-        )
-
-
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run the identification scan (Part 1)."""
     client = DevinAPIClient(
