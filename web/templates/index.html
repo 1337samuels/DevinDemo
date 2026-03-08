@@ -1991,20 +1991,75 @@
         let dashboardLoaded = false;  // tracks whether dashboard has already been rendered
 
         async function loadDashboardRepoSelect() {
-            await loadRepoSelector('dashboard-repo-select', {emptyLabel: 'Select a repository\u2026'});
-
-            // If we have preloaded data from the landing page, pre-select that repo
+            // Check if we have fully preloaded data from the landing page
+            var preloadReady = localStorage.getItem('dashboardPreload_ready');
+            var preloadRepos = localStorage.getItem('dashboardPreload_repos');
             var preloadRepo = localStorage.getItem('dashboardPreload_repo');
-            if (preloadRepo) {
+            var preloadFiles = localStorage.getItem('dashboardPreload_files');
+            var preloadData = localStorage.getItem('dashboardPreload_data');
+
+            if (preloadReady && preloadRepos && preloadRepo && preloadFiles && preloadData) {
+                // Use ALL preloaded data — skip every API call
+                var repos = JSON.parse(preloadRepos);
+                var files = JSON.parse(preloadFiles);
+                var data = JSON.parse(preloadData);
+                var preloadSelectedFile = localStorage.getItem('dashboardPreload_selectedFile');
+
+                // Populate repo dropdown from cache
                 var repoSelect = document.getElementById('dashboard-repo-select');
-                if (repoSelect) {
-                    var opts = Array.from(repoSelect.options);
-                    var match = opts.find(function(o) { return o.value === preloadRepo; });
-                    if (match) repoSelect.value = preloadRepo;
+                repoSelect.innerHTML = '';
+                var allOpt = document.createElement('option');
+                allOpt.value = '';
+                allOpt.textContent = 'Select a repository\u2026';
+                repoSelect.appendChild(allOpt);
+                repos.forEach(function(r) {
+                    var opt = document.createElement('option');
+                    opt.value = r;
+                    opt.textContent = r;
+                    repoSelect.appendChild(opt);
+                });
+                repoSelect.value = preloadRepo;
+
+                // Populate file dropdown from cache
+                var fileSelect = document.getElementById('dashboard-file-select');
+                fileSelect.innerHTML = '';
+                files.forEach(function(f) {
+                    var opt = document.createElement('option');
+                    opt.value = f.path;
+                    opt.textContent = f.label;
+                    fileSelect.appendChild(opt);
+                });
+                if (preloadSelectedFile) {
+                    fileSelect.value = preloadSelectedFile;
+                } else {
+                    fileSelect.value = files[0].path;
                 }
+
+                // Render dashboard immediately from cache
+                renderDashboard(data);
+                dashboardLoaded = true;
+
+                // Render trend data if available
+                var preloadTrend = localStorage.getItem('dashboardPreload_trend');
+                if (preloadTrend) {
+                    var trendData = JSON.parse(preloadTrend);
+                    renderTrendDeltas(trendData, data);
+                    renderTrendChart(trendData);
+                }
+
+                // Clear all preload cache
+                localStorage.removeItem('dashboardPreload_ready');
+                localStorage.removeItem('dashboardPreload_repos');
+                localStorage.removeItem('dashboardPreload_repo');
+                localStorage.removeItem('dashboardPreload_files');
+                localStorage.removeItem('dashboardPreload_data');
+                localStorage.removeItem('dashboardPreload_selectedFile');
+                localStorage.removeItem('dashboardPreload_trend');
+                return;
             }
 
-            // After loading repos, load the file select for the selected repo
+            // No preloaded data — fetch normally
+            await loadRepoSelector('dashboard-repo-select', {emptyLabel: 'Select a repository\u2026'});
             loadDashboardFileSelect();
         }
 
@@ -2014,47 +2069,6 @@
             if (!select) return;
             const repoFilter = repoSelect ? repoSelect.value : '';
             const prevValue = select.value;
-
-            // Check for preloaded data from the landing page
-            var preloadRepo = localStorage.getItem('dashboardPreload_repo');
-            var preloadFiles = localStorage.getItem('dashboardPreload_files');
-            var preloadData = localStorage.getItem('dashboardPreload_data');
-            var preloadSelectedFile = localStorage.getItem('dashboardPreload_selectedFile');
-
-            if (preloadRepo && preloadFiles && preloadData && repoFilter === preloadRepo) {
-                // Use preloaded data — skip the network requests
-                var files = JSON.parse(preloadFiles);
-                var data = JSON.parse(preloadData);
-                select.innerHTML = '';
-                files.forEach(function(f) {
-                    var opt = document.createElement('option');
-                    opt.value = f.path;
-                    opt.textContent = f.label;
-                    select.appendChild(opt);
-                });
-                if (preloadSelectedFile) {
-                    select.value = preloadSelectedFile;
-                } else {
-                    select.value = files[0].path;
-                }
-                // Render dashboard immediately from cache
-                renderDashboard(data);
-                dashboardLoaded = true;
-                // Render trend data if available
-                var preloadTrend = localStorage.getItem('dashboardPreload_trend');
-                if (preloadTrend) {
-                    var trendData = JSON.parse(preloadTrend);
-                    renderTrendDeltas(trendData, data);
-                    renderTrendChart(trendData);
-                }
-                // Clear the cache so subsequent navigations fetch fresh data
-                localStorage.removeItem('dashboardPreload_repo');
-                localStorage.removeItem('dashboardPreload_files');
-                localStorage.removeItem('dashboardPreload_data');
-                localStorage.removeItem('dashboardPreload_selectedFile');
-                localStorage.removeItem('dashboardPreload_trend');
-                return;
-            }
 
             select.innerHTML = '<option value="">Loading...</option>';
             try {
