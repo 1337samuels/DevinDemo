@@ -260,50 +260,6 @@ def cmd_validate(args: argparse.Namespace) -> None:
     print(f"[validate] ACU used (cumulative): {round(acu_total, 4)}")
 
 
-class CleanupProgressTrackerFactory:
-    """Progress tracker factory for the cleanup phase (Part 3)."""
-
-    def __call__(
-        self,
-        finding_idx: int,
-        total_findings: int,
-        candidate_id: str,
-    ) -> "_CleanupProgressCallback":
-        return _CleanupProgressCallback(
-            finding_idx, total_findings, candidate_id
-        )
-
-
-class _CleanupProgressCallback:
-    """Per-finding progress callback for the cleanup phase."""
-
-    def __init__(
-        self,
-        finding_idx: int,
-        total_findings: int,
-        candidate_id: str,
-    ) -> None:
-        self._finding_idx = finding_idx
-        self._total = total_findings
-        self._candidate_id = candidate_id
-        self._start = time.monotonic()
-
-    @staticmethod
-    def _fmt_elapsed(seconds: float) -> str:
-        m, s = divmod(int(seconds), 60)
-        return f"{m}m{s:02d}s" if m else f"{s}s"
-
-    def __call__(self, session: dict) -> None:
-        elapsed = time.monotonic() - self._start
-        status = session.get("status", "")
-        detail = session.get("status_detail", "")
-        print(
-            f"  [{self._fmt_elapsed(elapsed)}] {status}"
-            f" ({detail})"
-            f"  | Finding {self._finding_idx}/{self._total}"
-            f"  | {self._candidate_id}"
-        )
-
 
 def cmd_cleanup(args: argparse.Namespace) -> None:
     """Generate cleanup PRs for HIGH-confidence findings (Part 3)."""
