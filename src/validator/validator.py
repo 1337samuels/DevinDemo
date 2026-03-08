@@ -1430,14 +1430,6 @@ class LegacyCodeValidator:
     ``send_message()`` uses the v1 API which works with ``cog_`` keys.
     """
 
-    # The follow-up message sent to unblock a waiting session.
-    _NUDGE_MESSAGE = (
-        "Please continue with the validation analysis and produce your "
-        "results as a JSON block. If you need any clarification, proceed "
-        "with best-effort analysis using the information already available "
-        "in the repository."
-    )
-
     def __init__(
         self,
         client: DevinAPIClient,
