@@ -727,31 +727,33 @@
     <!-- Preload dashboard data in the background so it's instant when user navigates -->
     <script>
     (function() {
-        var DEFAULT_REPO = '1337samuels/SampleCodebaseFeatureFlags';
-        // 1. Fetch the list of validate result files for the default repo
-        fetch('/api/results/validate?repo=' + encodeURIComponent(DEFAULT_REPO))
-            .then(function(r) { return r.json(); })
-            .then(function(files) {
-                if (!files.length) return;
-                var filePath = files[0].path;
-                // Store the file list and selected repo for the dashboard to pick up
-                localStorage.setItem('dashboardPreload_repo', DEFAULT_REPO);
-                localStorage.setItem('dashboardPreload_files', JSON.stringify(files));
-                localStorage.setItem('dashboardPreload_selectedFile', filePath);
-                // 2. Fetch the actual dashboard data
-                var url = '/api/dashboard-data?file=' + encodeURIComponent(filePath) + '&repo=' + encodeURIComponent(DEFAULT_REPO);
-                return fetch(url).then(function(r) { return r.json(); }).then(function(data) {
-                    localStorage.setItem('dashboardPreload_data', JSON.stringify(data));
-                    // 3. Fetch trend data
-                    var repoName = data.repo || DEFAULT_REPO;
-                    return fetch('/api/trend-data?repo=' + encodeURIComponent(repoName))
-                        .then(function(r) { return r.json(); })
-                        .then(function(trend) {
-                            localStorage.setItem('dashboardPreload_trend', JSON.stringify(trend));
-                        });
-                });
-            })
-            .catch(function() { /* preload is best-effort */ });
+        var DEFAULT_REPO = '1337samuels/nlp_paper';
+        // Preload repo list AND dashboard data in parallel
+        var reposPromise = fetch('/api/repos').then(function(r) { return r.json(); });
+        var filesPromise = fetch('/api/results/validate?repo=' + encodeURIComponent(DEFAULT_REPO))
+            .then(function(r) { return r.json(); });
+
+        Promise.all([reposPromise, filesPromise]).then(function(results) {
+            var repos = results[0];
+            var files = results[1];
+            // Store repo list so dashboard skips /api/repos call
+            localStorage.setItem('dashboardPreload_repos', JSON.stringify(repos));
+            if (!files.length) return;
+            var filePath = files[0].path;
+            localStorage.setItem('dashboardPreload_repo', DEFAULT_REPO);
+            localStorage.setItem('dashboardPreload_files', JSON.stringify(files));
+            localStorage.setItem('dashboardPreload_selectedFile', filePath);
+            // Fetch dashboard data and trend data in parallel
+            var dataUrl = '/api/dashboard-data?file=' + encodeURIComponent(filePath) + '&repo=' + encodeURIComponent(DEFAULT_REPO);
+            var dataPromise = fetch(dataUrl).then(function(r) { return r.json(); });
+            var trendPromise = fetch('/api/trend-data?repo=' + encodeURIComponent(DEFAULT_REPO))
+                .then(function(r) { return r.json(); });
+            return Promise.all([dataPromise, trendPromise]).then(function(r2) {
+                localStorage.setItem('dashboardPreload_data', JSON.stringify(r2[0]));
+                localStorage.setItem('dashboardPreload_trend', JSON.stringify(r2[1]));
+                localStorage.setItem('dashboardPreload_ready', 'true');
+            });
+        }).catch(function() { /* preload is best-effort */ });
     })();
     </script>
 
