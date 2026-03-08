@@ -720,10 +720,6 @@ def handle_run_phase(data):
         if args.get("slack_channel_id"):
             cmd.extend(["--slack-channel-id", args["slack_channel_id"]])
 
-    else:
-        emit("error", {"data": f"Unknown phase: {phase}\n"})
-        return
-
     # Run in a background thread so we don't block.
     # Each phase runs independently — multiple phases can execute concurrently.
     from flask import request as flask_request
