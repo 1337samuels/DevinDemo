@@ -1974,7 +1974,8 @@
                 currentMode = tab.dataset.mode;
                 document.getElementById('mode-' + currentMode).classList.add('active');
                 if (currentMode === 'dashboard') {
-                    loadDashboardRepoSelect();
+                    // Skip re-fetching if dashboard is already loaded
+                    if (!dashboardLoaded) loadDashboardRepoSelect();
                 } else if (currentMode === 'cnc') {
                     loadRepoSelector('cnc-repo-select', {emptyLabel: 'All repositories'});
                     loadAllDropdowns();
@@ -1987,6 +1988,7 @@
         let prStatusChart = null;
         let confidenceChart = null;
         let trendChart = null;
+        let dashboardLoaded = false;  // tracks whether dashboard has already been rendered
 
         async function loadDashboardRepoSelect() {
             await loadRepoSelector('dashboard-repo-select', {emptyLabel: 'Select a repository\u2026'});
@@ -2037,6 +2039,7 @@
                 }
                 // Render dashboard immediately from cache
                 renderDashboard(data);
+                dashboardLoaded = true;
                 // Render trend data if available
                 var preloadTrend = localStorage.getItem('dashboardPreload_trend');
                 if (preloadTrend) {
@@ -2094,11 +2097,13 @@
         }
 
         document.getElementById('dashboard-repo-select').addEventListener('change', function() {
+            dashboardLoaded = false;  // user changed repo, allow full reload
             loadDashboardFileSelect();
         });
 
         document.getElementById('dashboard-file-select').addEventListener('change', function() {
             if (this.value) {
+                dashboardLoaded = false;  // user changed file, allow full reload
                 loadDashboardData(this.value);
             }
         });
@@ -2127,6 +2132,7 @@
                 }
                 const data = await resp.json();
                 renderDashboard(data);
+                dashboardLoaded = true;
 
                 // Fetch trend data for delta indicators and trend chart
                 const repoName = data.repo;
