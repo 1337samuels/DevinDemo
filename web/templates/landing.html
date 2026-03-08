@@ -724,5 +724,36 @@
         <img src="/static/devin-logo.png" alt="Devin" style="height:1.25em;vertical-align:middle;margin-right:0.35em;">DevinDemo &mdash; Feature-flag &amp; tech-debt scanner powered by Devin API
     </footer>
 
+    <!-- Preload dashboard data in the background so it's instant when user navigates -->
+    <script>
+    (function() {
+        var DEFAULT_REPO = '1337samuels/SampleCodebaseFeatureFlags';
+        // 1. Fetch the list of validate result files for the default repo
+        fetch('/api/results/validate?repo=' + encodeURIComponent(DEFAULT_REPO))
+            .then(function(r) { return r.json(); })
+            .then(function(files) {
+                if (!files.length) return;
+                var filePath = files[0].path;
+                // Store the file list and selected repo for the dashboard to pick up
+                localStorage.setItem('dashboardPreload_repo', DEFAULT_REPO);
+                localStorage.setItem('dashboardPreload_files', JSON.stringify(files));
+                localStorage.setItem('dashboardPreload_selectedFile', filePath);
+                // 2. Fetch the actual dashboard data
+                var url = '/api/dashboard-data?file=' + encodeURIComponent(filePath) + '&repo=' + encodeURIComponent(DEFAULT_REPO);
+                return fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+                    localStorage.setItem('dashboardPreload_data', JSON.stringify(data));
+                    // 3. Fetch trend data
+                    var repoName = data.repo || DEFAULT_REPO;
+                    return fetch('/api/trend-data?repo=' + encodeURIComponent(repoName))
+                        .then(function(r) { return r.json(); })
+                        .then(function(trend) {
+                            localStorage.setItem('dashboardPreload_trend', JSON.stringify(trend));
+                        });
+                });
+            })
+            .catch(function() { /* preload is best-effort */ });
+    })();
+    </script>
+
 </body>
 </html>

@@ -1990,6 +1990,18 @@
 
         async function loadDashboardRepoSelect() {
             await loadRepoSelector('dashboard-repo-select', {emptyLabel: 'Select a repository\u2026'});
+
+            // If we have preloaded data from the landing page, pre-select that repo
+            var preloadRepo = localStorage.getItem('dashboardPreload_repo');
+            if (preloadRepo) {
+                var repoSelect = document.getElementById('dashboard-repo-select');
+                if (repoSelect) {
+                    var opts = Array.from(repoSelect.options);
+                    var match = opts.find(function(o) { return o.value === preloadRepo; });
+                    if (match) repoSelect.value = preloadRepo;
+                }
+            }
+
             // After loading repos, load the file select for the selected repo
             loadDashboardFileSelect();
         }
@@ -2000,6 +2012,47 @@
             if (!select) return;
             const repoFilter = repoSelect ? repoSelect.value : '';
             const prevValue = select.value;
+
+            // Check for preloaded data from the landing page
+            var preloadRepo = localStorage.getItem('dashboardPreload_repo');
+            var preloadFiles = localStorage.getItem('dashboardPreload_files');
+            var preloadData = localStorage.getItem('dashboardPreload_data');
+            var preloadSelectedFile = localStorage.getItem('dashboardPreload_selectedFile');
+
+            if (preloadRepo && preloadFiles && preloadData && repoFilter === preloadRepo) {
+                // Use preloaded data — skip the network requests
+                var files = JSON.parse(preloadFiles);
+                var data = JSON.parse(preloadData);
+                select.innerHTML = '';
+                files.forEach(function(f) {
+                    var opt = document.createElement('option');
+                    opt.value = f.path;
+                    opt.textContent = f.label;
+                    select.appendChild(opt);
+                });
+                if (preloadSelectedFile) {
+                    select.value = preloadSelectedFile;
+                } else {
+                    select.value = files[0].path;
+                }
+                // Render dashboard immediately from cache
+                renderDashboard(data);
+                // Render trend data if available
+                var preloadTrend = localStorage.getItem('dashboardPreload_trend');
+                if (preloadTrend) {
+                    var trendData = JSON.parse(preloadTrend);
+                    renderTrendDeltas(trendData, data);
+                    renderTrendChart(trendData);
+                }
+                // Clear the cache so subsequent navigations fetch fresh data
+                localStorage.removeItem('dashboardPreload_repo');
+                localStorage.removeItem('dashboardPreload_files');
+                localStorage.removeItem('dashboardPreload_data');
+                localStorage.removeItem('dashboardPreload_selectedFile');
+                localStorage.removeItem('dashboardPreload_trend');
+                return;
+            }
+
             select.innerHTML = '<option value="">Loading...</option>';
             try {
                 let url = '/api/results/validate';
